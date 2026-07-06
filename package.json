@@ -1,0 +1,22 @@
+{
+  "name": "deloitte-ai-infra-studio",
+  "private": true,
+  "version": "2.0.0",
+  "type": "module",
+  "description": "Deloitte AI Infrastructure COE — on-prem GPU sizing, tiered BOM, and TCO studio",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.1",
+    "vite": "^5.4.0",
+    "vitest": "^4.1.9"
+  }
+}
