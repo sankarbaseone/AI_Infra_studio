@@ -9,11 +9,13 @@ new session without losing context. Update it at the end of each working session
 **Owner:** Sankar — AI Infrastructure Advisory & Technical Delivery, Deloitte (COE)
 **Classification:** Internal — Deloitte AI Infrastructure COE asset
 **Status:** v2.0 built, verified working, and launched locally; `docs/` documentation set
-and `CLAUDE.md` added; calc/tco test suite added (28 tests passing); git init handed off to
-Sankar on Windows (remote created: `https://github.com/sankarbaseone/AI_Infra_studio`) —
-**pending confirmation that the first commit + push actually landed**. The "Your
+and `CLAUDE.md` added; calc/tco test suite added (28 tests passing); **git repo is now live**
+— but in `~/workspace/nydux` (native Linux mirror), not the Windows-mounted path, since WSL
+cannot write git objects to `/mnt/c/...` at all (see environment note below). First commit
+`fd03284`, remote `https://github.com/sankarbaseone/AI_Infra_studio` added — **push still
+pending**, needs Sankar's GitHub credentials (not present in this environment). The "Your
 Configuration" live-column feature (spec received 2026-07-05/06, resolves D10/Backlog #2) is
-next, now that its two prerequisites (#1 git init, #3 test suite) are substantively done.
+next, now that its two prerequisites (#1 git init, #3 test suite) are done.
 
 **⚠️ Environment note (discovered 2026-07-05, extended 2026-07-06):** this repo lives on a
 Windows-mounted DrvFS path (`/mnt/c/...` from WSL). DrvFS mounts here do not support `chmod`
@@ -37,14 +39,22 @@ npm/PowerShell instead if it's ever needed directly in the master folder.
 (and `git add`/`git commit`) also fail on this mount from WSL — git's lockfile mechanism
 (`.git/config.lock`, `.git/index.lock`, etc.) calls `chmod` on every write, not just at init
 time. `git init` cannot even complete cleanly here (confirmed 2026-07-06 — it leaves a
-half-written `.git/` directory and errors on `core.filemode`). **Resolution:** git
-init/add/commit for this project happen on Sankar's Windows side (native Git — PowerShell,
-Git Bash, or an IDE), not through WSL. Claude Code continues to edit source files directly on
-the Windows-mounted path (plain file writes are unaffected — only permission-changing
-syscalls are blocked) and hands off exact `git` commands plus a proposed commit message for
-Sankar to run himself. See `DECISIONS.md` D9 for the full record of this decision, including
-the alternatives considered (fixing the WSL mount's `metadata` option; relocating the
-canonical repo to `~/workspace/nydux`) and why the Windows-side-git approach was chosen.
+half-written `.git/` directory and errors on `core.filemode`).
+
+**Resolution actually adopted (2026-07-06):** rather than Sankar running git on Windows
+(the initial plan), Sankar asked Claude Code to do the commit directly. Since WSL can't
+write git objects to `/mnt/c/...` at all, **the git repository now lives in
+`~/workspace/nydux` (the native Linux mirror) — that is the canonical, git-tracked copy of
+this project going forward.** First commit: `fd03284`. Remote:
+`https://github.com/sankarbaseone/AI_Infra_studio`. The Windows-mounted
+`/mnt/c/.../infra-studio-v2` folder has no `.git` and cannot get one from WSL; it's kept in
+sync via the same `cp --no-preserve=mode,ownership,timestamps` pattern used for
+build artifacts, so it stays useful for Windows-side editors/IDEs, but it is **not** where
+git history lives. Pushing to GitHub requires a Personal Access Token that isn't present in
+this WSL environment — Sankar runs `git push` himself from a WSL terminal. See
+`DECISIONS.md` D9 for the full record, including the alternatives considered (fixing the
+WSL mount's `metadata` option; Sankar running all git ops on Windows) and why this dual-
+location model was adopted instead.
 
 ---
 

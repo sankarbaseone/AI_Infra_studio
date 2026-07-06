@@ -15,10 +15,11 @@ updated at the end of every working session per Roadmap §9.4.
   1/2 roadmap remainder — see `PRODUCT_BACKLOG.md`.
 - `CLAUDE.md` added, governing workflow (plan → approval → implement → build → docs update;
   never auto-commit).
-- Git repository initialization handed off to Sankar (Windows-side git) — remote
-  `https://github.com/sankarbaseone/AI_Infra_studio`. Discovered that git cannot write to
-  this repo's location from WSL at all (DrvFS mount blocks `chmod`, which git's lockfile
-  mechanism needs for every write) — see `DECISIONS.md` D9.
+- Git repository initialized — in `~/workspace/nydux` (native Linux mirror), not the
+  Windows-mounted path, since git cannot write to that location from WSL at all (DrvFS mount
+  blocks `chmod`, which git's lockfile mechanism needs for every write). First commit
+  `fd03284`. Remote added: `https://github.com/sankarbaseone/AI_Infra_studio`. Push pending
+  Sankar's GitHub credentials. See `DECISIONS.md` D9 for the full record.
 - Test suite added for the sizing engine: `src/lib/calc.test.js` (16 tests) and
   `src/lib/tco.test.js` (12 tests), 28 tests total, via Vitest (`npm test`). Zero production
   code changes — characterizes existing behavior, including the validated ~154-day training

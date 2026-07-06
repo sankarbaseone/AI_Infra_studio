@@ -139,21 +139,33 @@ must include a `DATA_META` entry from day one — this is not optional per Roadm
 (Roadmap §11).
 **Decision:** Every change should be committed with a clear message; the tool should be
 reproducible via clone + install, not manual file copying.
-**Status:** In progress (2026-07-06). Discovered that the repo's location — a Windows-mounted
-DrvFS path (`/mnt/c/...`) — cannot support git writes from WSL at all: git's lockfile
-mechanism calls `chmod` on `.git/*.lock` files for every write operation (`init`, `add`,
-`commit`), and DrvFS mounted without the `metadata` option rejects every `chmod` call
-categorically. This is not fixable by choosing a different git command. **Resolution:**
-Sankar runs git directly on Windows (native Git, not through WSL) for all init/add/commit
-operations going forward; Claude Code continues to edit source files directly on the
-Windows-mounted path (plain file writes work fine — only permission-setting syscalls like
-`chmod` are blocked) and hands off exact git commands + proposed commit messages for Sankar
-to execute. Remote: `https://github.com/sankarbaseone/AI_Infra_studio`.
-**Consequences:** Every future feature's "propose a commit message, wait for approval" step
-(per `CLAUDE.md`'s Git Workflow) ends with Sankar running the actual `git add`/`commit`
-himself, not Claude Code executing it. Do not attempt `git init`/`git commit` from WSL against
-this path again — it will fail the same way every time until/unless the mount itself is fixed
-(see the "Fix the WSL mount" option that was declined in favor of this approach).
+**Status:** RESOLVED 2026-07-06. Discovered that the repo's canonical location — a
+Windows-mounted DrvFS path (`/mnt/c/...`) — cannot support git writes from WSL at all: git's
+lockfile mechanism calls `chmod` on `.git/*.lock` files for every write operation (`init`,
+`add`, `commit`), and DrvFS mounted without the `metadata` option rejects every `chmod` call
+categorically. This is not fixable by choosing a different git command.
+
+**Resolution actually adopted (superseding the initial plan):** Sankar asked Claude Code to
+perform the commit directly rather than doing it himself on Windows. Since WSL can't write
+git objects to the `/mnt/c/...` path at all, **the git repository was initialized in the
+native Linux mirror, `~/workspace/nydux`, instead** — first commit `fd03284`, remote
+`https://github.com/sankarbaseone/AI_Infra_studio` added. This means:
+- **`~/workspace/nydux` is now the actual git-tracked, canonical repo.** The Windows-mounted
+  `/mnt/c/.../infra-studio-v2` folder has no `.git` and cannot get one from WSL — it must be
+  kept in sync via plain-file copy (the existing `cp --no-preserve=mode,...` pattern) after
+  each commit, or accepted as a non-canonical working copy for Windows-side editors.
+- Pushing requires GitHub credentials (a Personal Access Token), which are not present in
+  this environment — Sankar runs `git push` himself from a WSL terminal for now.
+- Future features: Claude Code edits source in the Windows-mounted path (for Windows-editor
+  visibility) *and* keeps `~/workspace/nydux` in sync, running git commits from the mirror
+  after approval — per `CLAUDE.md`'s Git Workflow, still proposing the message and waiting
+  for approval before committing, just executing the actual commit itself now (from the
+  mirror) rather than handing every commit to Sankar.
+
+**Consequences:** Any doc or workflow note written before 2026-07-06 that says "Sankar runs
+git on Windows" is superseded by this. The dual-location sync (Windows path for editing/
+Windows tools, Linux mirror for git/build/test) is now the standing model — see
+`PROJECT_STATE.md`'s environment note for the operational detail.
 
 ---
 
