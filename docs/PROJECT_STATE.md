@@ -11,12 +11,13 @@ new session without losing context. Update it at the end of each working session
 **Status:** v2.0 built, verified working, and launched locally; `docs/` documentation set and
 `CLAUDE.md` added; calc/tco/format test suite built out (52 tests passing) — surfaced a real
 financing-model discrepancy along the way, see `PRODUCT_BACKLOG.md` item 3; git repo live in
-`~/workspace/nydux` (native Linux mirror — see environment note below), 4 commits made,
-**pushed to `https://github.com/sankarbaseone/AI_Infra_studio` and confirmed in sync**.
-**"Your Configuration" live BOM column implemented** (resolves Backlog #2 / D10) — see below
-for the scope amendment made during planning (fabric/storage became real InferenceTab
-inputs; control-node sizing became a node-count formula applied to all 4 columns). Awaiting
-commit + push approval for this change as of this update.
+`~/workspace/nydux` (native Linux mirror — see environment note below), 5 commits made,
+**pushed to `https://github.com/sankarbaseone/AI_Infra_studio` and confirmed in sync**
+(`b26fece`, latest, pushed 2026-07-06).
+**"Your Configuration" live BOM column implemented and shipped** (resolves Backlog #2 / D10)
+— see below for the scope amendment made during planning (fabric/storage became real
+InferenceTab inputs; control-node sizing became a node-count formula applied to all 4
+columns).
 
 **⚠️ Environment note (discovered 2026-07-05, extended 2026-07-06):** this repo lives on a
 Windows-mounted DrvFS path (`/mnt/c/...` from WSL). DrvFS mounts here do not support `chmod`
