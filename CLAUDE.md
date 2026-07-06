@@ -65,7 +65,7 @@ Always
 
 Before writing code
 
-1. Read PROJECT_STATE.md
+1. Read docs/PROJECT_STATE.md
 2. Read README.md
 3. Understand current sprint
 
@@ -77,9 +77,12 @@ For every feature
 4. Build project
 5. Fix errors
 6. Update documentation
-7. Update PROJECT_STATE.md
+7. Update docs/PROJECT_STATE.md
 
 Never skip documentation updates.
+
+When a feature is finished, follow the Git Workflow section below — it governs from
+build/test through commit and push.
 
 ---
 
@@ -129,7 +132,7 @@ Whenever architecture changes
 
 Update
 
-- PROJECT_STATE.md
+- docs/PROJECT_STATE.md
 - README.md
 
 Whenever calculations change
@@ -143,15 +146,25 @@ Update
 
 # Git Workflow
 
-Never commit automatically.
+When a feature is finished, in order:
 
-Always
+1. Run `npm run build`
+2. Fix any build errors
+3. Run the full test suite
+4. Show `git diff` (or a summary of it if large)
+5. Generate a professional commit message
+6. Commit the changes — committing locally does not require a separate approval step; the
+   feature was already approved before implementation started (see Development Workflow)
+7. Ask for approval
+8. Push to GitHub only after that approval
 
-- explain changes
-- summarize affected files
-- suggest commit message
+Never push without explicit approval — push is the step that always needs a fresh yes, even
+if committing locally didn't. Never skip steps 1-4 (build/fix/test/diff) before committing,
+even if step 6 itself doesn't need a separate approval gate.
 
-Wait for approval before committing.
+Note (2026-07-06): this repo's git history lives in `~/workspace/nydux` (a native Linux
+mirror), not the Windows-mounted project path — see `docs/DECISIONS.md` D9 for why. Steps
+1-6 run there; step 4's diff and step 6's commit both happen against that location.
 
 ---
 
