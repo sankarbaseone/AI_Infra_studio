@@ -173,11 +173,41 @@ Windows tools, Linux mirror for git/build/test) is now the standing model — se
 **Context:** Documented here separately from D3 because it reads, on first encounter, like a
 bug rather than a decision — worth being explicit that it is a consequence of D3, not an
 oversight, even though the InferenceTab's own UI copy ("flows into the BOM & TCO tab")
-currently overstates what actually happens.
-**Decision:** Until a product decision resolves
-[PRODUCT_BACKLOG.md item 2](./PRODUCT_BACKLOG.md#2-fix-tieredbomtab--shared-state-disconnect),
-treat the BOM tab's independence from `shared` state as intentional (per D3), and treat the
-InferenceTab copy as the actual defect to fix — not the BOM tab's fixed-tier math.
-**Status:** Open — flagged for a deliberate decision, not a silent patch either way.
-**Consequences:** Whoever picks up backlog item 2 should re-read D3 first so the fix doesn't
-inadvertently revert the fixed-tier decision.
+currently overstated what actually happened.
+
+**Status:** RESOLVED 2026-07-06 — hybrid approach implemented, with one amendment made
+during planning (Sankar's direction, overriding the original spec draft):
+- The three fixed tiers (Foundation/Standard/Enterprise) are UNCHANGED in `usersMid`/band
+  definition and remain governed by D3.
+- A new 4th column, **"Your Configuration,"** was added to `TieredBomTab.jsx`, wired live to
+  `shared` (see `src/lib/sharedSchema.js` for the schema / readiness check). It shows a
+  placeholder ("Configure the Inference tab to populate this column") until InferenceTab has
+  been configured.
+- `InferenceTab.jsx`'s copy is corrected to name the "Your Configuration" column specifically.
+- **AMENDMENT (not in the original spec):** the original spec proposed defaulting the live
+  column's fabric/storage/control-node values to the "nearest fixed tier's" static data.
+  Sankar rejected this and directed instead: (1) **fabric and storage capacity are now real,
+  editable InferenceTab inputs** (it had neither before), not tier-linked; (2)
+  **control-node vCPU/RAM sizing is now a formula keyed by GPU compute-node count**
+  (`controlNodeSpec()` in `src/lib/tco.js`), applied uniformly to **all 4 columns** — the 3
+  fixed tiers included, not just the new one. This replaces the static
+  `TIERS[*].ctrlVcpu/ctrlRam` constants, which — per an empirical check during
+  planning — never actually correlated with real compute-node count (all 3 tiers compute to
+  1 GPU node under typical demo defaults, yet had a hardcoded 8/16/32 vCPU progression).
+  Control Nodes had been the one row in the whole 7-layer matrix not computed live; this
+  amendment fixes that inconsistency with the tool's own stated design principle.
+- Vendor-toggle scope: the live column always shows the exact GPU chosen in InferenceTab,
+  regardless of the BOM tab's NVIDIA/AMD toggle (that toggle only affects the 3 template
+  tiers' auto-picked representative GPU). There's no defensible "equivalent AMD GPU"
+  remapping for an arbitrary specific pick the way there is for a tier's generic default —
+  the live column's *numbers* still refresh on toggle (financing/TCO recompute), but its GPU
+  choice does not change.
+
+**Consequences:** D3's fixed-tier template (band definitions) is fully preserved — no risk
+to the Deloitte PRODUCTION BOM template match. The credibility gap in InferenceTab's copy is
+closed. Control-node sizing is genuinely live for the first time across all 4 columns. This
+is an intentional, scoped exception to "no behavior change to the 3 fixed tiers" — the 3
+fixed tiers' `ctrlVcpu`/`ctrlRam` values did change (formula-derived now, not static), while
+every other field (capex, financing, unit economics, GPU counts) is unchanged, confirmed by
+the existing calc/tco test suite (Backlog #3) still passing unmodified plus new
+`controlNodeSpec()`-specific tests.

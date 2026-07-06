@@ -76,10 +76,14 @@ export const MODELS = {
 };
 
 // ---- Tiered BOM defaults (fixed tiers — see roadmap §6 decision) ----------
+// Note: ctrlVcpu/ctrlRam used to be static per-tier constants here. They're now derived
+// live from GPU compute-node count via controlNodeSpec() in lib/tco.js, applied uniformly
+// across all BOM columns (including the "Your Configuration" live column) — see
+// docs/DECISIONS.md D10.
 export const TIERS = [
-  { key: "foundation", label: "Foundation", usersMin: 200, usersMax: 300, usersMid: 250, storageDefaultTB: 10, ctrlVcpu: 8, ctrlRam: 64, fabricDefault: "roce" },
-  { key: "standard", label: "Standard", usersMin: 300, usersMax: 500, usersMid: 400, storageDefaultTB: 200, ctrlVcpu: 16, ctrlRam: 256, fabricDefault: "roce800" },
-  { key: "enterprise", label: "Enterprise", usersMin: 500, usersMax: 800, usersMid: 650, storageDefaultTB: 500, ctrlVcpu: 32, ctrlRam: 512, fabricDefault: "ib" },
+  { key: "foundation", label: "Foundation", usersMin: 200, usersMax: 300, usersMid: 250, storageDefaultTB: 10, fabricDefault: "roce" },
+  { key: "standard", label: "Standard", usersMin: 300, usersMax: 500, usersMid: 400, storageDefaultTB: 200, fabricDefault: "roce800" },
+  { key: "enterprise", label: "Enterprise", usersMin: 500, usersMax: 800, usersMid: 650, storageDefaultTB: 500, fabricDefault: "ib" },
 ];
 
 // ---- Cost/financing factors ------------------------------------------------

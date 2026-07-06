@@ -8,16 +8,15 @@ new session without losing context. Update it at the end of each working session
 **Last updated:** 2026-07-06
 **Owner:** Sankar — AI Infrastructure Advisory & Technical Delivery, Deloitte (COE)
 **Classification:** Internal — Deloitte AI Infrastructure COE asset
-**Status:** v2.0 built, verified working, and launched locally; `docs/` documentation set
-and `CLAUDE.md` added; calc/tco/format test suite added and extended per a follow-up spec
-(47 tests passing) — surfaced a real financing-model discrepancy along the way, see below;
-**git repo is now live**
-— but in `~/workspace/nydux` (native Linux mirror), not the Windows-mounted path, since WSL
-cannot write git objects to `/mnt/c/...` at all (see environment note below). First commit
-`fd03284`, remote `https://github.com/sankarbaseone/AI_Infra_studio` added — **push still
-pending**, needs Sankar's GitHub credentials (not present in this environment). The "Your
-Configuration" live-column feature (spec received 2026-07-05/06, resolves D10/Backlog #2) is
-next, now that its two prerequisites (#1 git init, #3 test suite) are done.
+**Status:** v2.0 built, verified working, and launched locally; `docs/` documentation set and
+`CLAUDE.md` added; calc/tco/format test suite built out (52 tests passing) — surfaced a real
+financing-model discrepancy along the way, see `PRODUCT_BACKLOG.md` item 3; git repo live in
+`~/workspace/nydux` (native Linux mirror — see environment note below), 4 commits made,
+**pushed to `https://github.com/sankarbaseone/AI_Infra_studio` and confirmed in sync**.
+**"Your Configuration" live BOM column implemented** (resolves Backlog #2 / D10) — see below
+for the scope amendment made during planning (fabric/storage became real InferenceTab
+inputs; control-node sizing became a node-count formula applied to all 4 columns). Awaiting
+commit + push approval for this change as of this update.
 
 **⚠️ Environment note (discovered 2026-07-05, extended 2026-07-06):** this repo lives on a
 Windows-mounted DrvFS path (`/mnt/c/...` from WSL). DrvFS mounts here do not support `chmod`
@@ -133,40 +132,59 @@ memory feasibility. Validated anchor: 70B/2T/128×H100/50% MFU → ~154 days.
 
 ### Tab 03 — Inference Sizing
 Concurrent users → req/sec → output tok/sec, sized against throughput AND KV-cache/weight
-memory; larger constraint wins. GQA-aware. Pushes `{inferGpu, inferGpus, aggregateTokPerSec,
-...}` into `shared` — **but see §3 caveat below: this does not actually reach the BOM tab.**
+memory; larger constraint wins. GQA-aware. Pushes a documented field set into `shared` (see
+`src/lib/sharedSchema.js`) — GPU/GPU-count/throughput, model/precision/context, and (new,
+2026-07-06) **Network fabric** and **Storage capacity (TB)**, which this tab didn't collect
+before. Now genuinely feeds the BOM tab's "Your Configuration" column (see Tab 04).
 
 ### Tab 04 — BOM & TCO (Tiered Multi-Layer BOM, v2 flagship)
 Foundation/Standard/Enterprise matrix across seven layers (Training, Inference, Token
 Processing, Storage, Control Nodes, Network Fabric, Concurrent Users), computed live from the
-sizing engine per tier. Vendor toggle (NVIDIA/AMD) recomputes the entire matrix — verified
-functionally neutral. 4-way financing comparison (On-Prem/Cloud/GPU-aaS/Colocation). Unit
-economics (cost/1K tokens, cost/inference). Workload-type chips (qualitative only, explicit
-disclaimer). Tiered PDF export.
+sizing engine per tier, **plus a 4th "Your Configuration" column** (added 2026-07-06) wired
+live to `shared`, with a placeholder state until Inference tab is configured. Vendor toggle
+(NVIDIA/AMD) recomputes the 3 fixed tiers' entire matrix — verified functionally neutral; the
+live column's numbers also recompute but its GPU choice stays pinned to whatever was picked
+in InferenceTab (deliberate exception, see `DECISIONS.md` D10). 4-way financing comparison
+(On-Prem/Cloud/GPU-aaS/Colocation) — see the flagged discrepancy in `PRODUCT_BACKLOG.md` item
+3 (`onPrem`/`cloud` structurally never win). Unit economics (cost/1K tokens, cost/inference).
+Control-node vCPU/RAM now a live formula (`controlNodeSpec()`) instead of static per-tier
+constants. Workload-type chips (qualitative only, explicit disclaimer). Tiered PDF export,
+which omits the live column entirely (not a placeholder) when unpopulated.
 
-**Known caveat, confirmed this session:** `TieredBomTab.jsx` does not read `shared` at all —
-it recomputes its own sizing per tier from fixed `usersMid` values, independent of whatever
-was configured in the Inference tab. See
+**Resolved this session:** `TieredBomTab.jsx` previously didn't read `shared` at all — see
+[DECISIONS.md D10](./DECISIONS.md#d10) for the full resolution and
 [PRODUCT_BACKLOG.md item 2](./PRODUCT_BACKLOG.md#2-fix-tieredbomtab--shared-state-disconnect)
-and [DECISIONS.md D10](./DECISIONS.md#d10) for whether this is a bug or a byproduct of the
-fixed-tier decision (D3) — flagged as needing a deliberate call, not a silent patch.
+for status.
 
 ---
 
 ## 3. Known gaps (consolidated, current as of this session)
 
-- **Git repo initialization handed off, not yet confirmed complete** — WSL cannot write to
-  this repo's location at all (see environment note, §1); Sankar runs git on Windows instead.
-  Confirm next session whether the push to `github.com/sankarbaseone/AI_Infra_studio` landed.
-- **Automated tests added (2026-07-06)** — `src/lib/calc.test.js` (16 tests),
-  `src/lib/tco.test.js` (12 tests), 28 tests total, all passing via Vitest (`npm test`).
-  No longer a gap for the calc/tco engine specifically; still no tests for UI components/tabs.
-- **No TypeScript** — confirmed, no `tsconfig.json`, `.jsx` throughout
-- **TieredBomTab/shared disconnect** — confirmed by direct code read (§2 above)
+- **Git repo is live** in `~/workspace/nydux`, 4 local commits, pushed and confirmed in sync
+  with `github.com/sankarbaseone/AI_Infra_studio` (no longer a gap).
+- **Automated tests**: `src/lib/calc.test.js`, `src/lib/tco.test.js`, `src/lib/format.test.js`
+  — 52 tests total, all passing via Vitest (`npm test`). No longer a gap for the calc/tco
+  engine; still no tests for UI components/tabs (no React component-test harness exists yet).
+- **No TypeScript** — confirmed, no `tsconfig.json`, `.jsx` throughout. `shared` now has a
+  documented (JSDoc, not runtime-enforced) shape via `src/lib/sharedSchema.js`.
+- ~~TieredBomTab/shared disconnect~~ — **Fixed 2026-07-06.** See
+  [DECISIONS.md D10](./DECISIONS.md#d10).
 - **Magic numbers in `calc.js`/`tco.js`** not lifted into `reference.js` (18, 0.85, 1.2,
   12000 — see [ARCHITECTURE.md](./ARCHITECTURE.md#calculation-engine-libcalcjs-libtcojs))
 - **Hardcoded `USD_INR = 83.5`**, no active staleness enforcement beyond a passive caption
 - **PDF export duplicates on-screen table logic** — two representations of the same matrix
+  (partially unified for the 4th column via a shared `columns`/`results` shape, but still two
+  separate render implementations overall)
+- **NEW: financing-model discrepancy** (found while writing the Backlog #3 test suite) —
+  `cheapestKey` never resolves to `onPrem`/`cloud` under current constants. Not fixed;
+  flagged for a decision. See `PRODUCT_BACKLOG.md` item 3.
+- **NEW: no live in-browser verification for the "Your Configuration" feature** — headless
+  Chromium couldn't be installed in this sandboxed WSL environment (missing system shared
+  libraries, `sudo` unavailable non-interactively). Verified instead via: `npm test` (52/52),
+  `npm run build` (clean), and a Node script exercising the real computation path with
+  realistic default inputs for both the 3 fixed tiers and the live column (zero NaN/Infinity,
+  confirmed live `aggregateTokPerSec` matches `shared` exactly). **Recommend a manual
+  click-through in an actual browser before the next client demo.**
 
 Full detail, priority, effort, and sequencing for all of the above is in
 [PRODUCT_BACKLOG.md](./PRODUCT_BACKLOG.md).
@@ -261,28 +279,25 @@ Toolchain: Node + npm · Vite v5.4.21 · React 18. Local commands (no model quot
 
 ## 8. Immediate next actions (pick up here)
 
-0. **Decide on the financing-model discrepancy** (surfaced 2026-07-06, not fixed —
+0. **Do a manual browser click-through of the "Your Configuration" feature** before the next
+   client demo — this session verified it via `npm test`/`npm run build`/a Node-script
+   sanity pass, but not an actual browser (headless Chromium couldn't be installed in this
+   sandboxed environment). Walk: fresh load → BOM tab shows placeholder 4th column → visit
+   Inference tab, configure GPU/fabric/storage → return to BOM tab → 4th column populates →
+   toggle vendor NVIDIA↔AMD → confirm 3 tiers' GPUs change, live column's doesn't (by design)
+   but its cost numbers still update → export PDF in both populated/unpopulated states.
+1. **Decide on the financing-model discrepancy** (surfaced 2026-07-06, not fixed —
    see `PRODUCT_BACKLOG.md` item 3): `cheapestKey` never resolves to `onPrem` or `cloud`
    under current constants — `colo` structurally beats `onPrem` for every GPU/region
    combination, and `gaas` always undercuts `cloud`. Is `SUPPORT_PCT`/`COLO_PER_KW_MONTH`
    miscalibrated, or is this an accurate (if counter-intuitive) reflection of real pricing?
-   This affects what the BOM tab's financing comparison actually demonstrates in a client
-   demo.
-1. **Confirm git landed.** Run `git log --oneline` (or check GitHub) to confirm the first
-   commit + push completed. If not done yet, re-run the commands provided at the end of the
-   2026-07-06 session (git init → commit 1 → remote add → push; then a second commit for the
-   test suite addition — see proposed message in `PRODUCT_BACKLOG.md` item 3's status note).
-2. **Implement the "Your Configuration" live-column feature** — spec received 2026-07-05/06,
-   resolves [DECISIONS.md D10](./DECISIONS.md#d10) / [PRODUCT_BACKLOG.md item 2](./PRODUCT_BACKLOG.md#2-fix-tieredbomtab--shared-state-disconnect).
-   Both prerequisites (#1 git, #3 tests) are substantively done — this is next, via its own
-   plan + approval cycle per `CLAUDE.md`.
-3. Confirm Deloitte-laptop Node/npm registry access — still outstanding.
-4. Decide whether to build the dedicated "vital DC input" discovery panel, or keep inputs
+2. Confirm Deloitte-laptop Node/npm registry access — still outstanding.
+3. Decide whether to build the dedicated "vital DC input" discovery panel, or keep inputs
    inline on the BOM tab (§4, item 1).
-5. Next feature slice per the Roadmap after the live-column feature: remainder of Phase 1
-   (scenario save/compare, sensitivity sliders) or move to Phase 2A (Digital Twin) — Sankar's
-   call on sequencing, informed by the backlog's recommended ordering.
-6. Workload-type numeric multipliers: identify a COE owner to supply calibrated deltas from
+4. Next feature slice per the Roadmap: remainder of Phase 1 (scenario save/compare,
+   sensitivity sliders) or move to Phase 2A (Digital Twin) — Sankar's call on sequencing,
+   informed by the backlog's recommended ordering.
+5. Workload-type numeric multipliers: identify a COE owner to supply calibrated deltas from
    real delivery data before those move from qualitative notes to client-facing numbers
    ([DECISIONS.md D4](./DECISIONS.md#d4)).
 

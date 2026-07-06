@@ -1,9 +1,32 @@
 import { describe, it, expect } from "vitest";
-import { buildBom, financingComparison, unitEconomics } from "./tco.js";
+import { buildBom, financingComparison, unitEconomics, controlNodeSpec } from "./tco.js";
 import {
   NODES, FABRICS, PUE_DEFAULT, USD_INR, KWH_INR, TCO_YEARS, GAAS_DISCOUNT,
   CLOUD_HR, COLO_PER_KW_MONTH,
 } from "../data/reference.js";
+
+describe("controlNodeSpec", () => {
+  it("floors at 8 vCPU / 64 GB for a single compute node", () => {
+    // Matches the tool's original Foundation-tier assumption at nodes=1, so the common
+    // demo case (single-node tiers) doesn't visibly regress from this refactor.
+    expect(controlNodeSpec(1)).toEqual({ vcpu: 8, ram: 64 });
+  });
+
+  it("scales +4 vCPU / +32 GB per additional compute node beyond the first", () => {
+    expect(controlNodeSpec(2)).toEqual({ vcpu: 12, ram: 96 });
+    expect(controlNodeSpec(4)).toEqual({ vcpu: 20, ram: 160 });
+  });
+
+  it("caps at 64 vCPU / 1024 GB for very large clusters", () => {
+    const big = controlNodeSpec(1000);
+    expect(big.vcpu).toBe(64);
+    expect(big.ram).toBe(1024);
+  });
+
+  it("never goes below the floor for 0 or negative node counts (defensive)", () => {
+    expect(controlNodeSpec(0)).toEqual({ vcpu: 8, ram: 64 });
+  });
+});
 
 describe("buildBom", () => {
   it("sums hardware + fabric + storage + rack cost into capex", () => {
@@ -25,6 +48,13 @@ describe("buildBom", () => {
     expect(bom.storageCost).toBe(storageCost);
     expect(bom.rackCost).toBe(rackCost);
     expect(bom.capex).toBe(hwCost + fabricCost + storageCost + rackCost);
+  });
+
+  it("includes control-node vCPU/RAM sizing derived from compute node count", () => {
+    const bom = buildBom({ gpuKey: "h100", gpuCount: 16, fabricKey: "ib", storageTB: 0, storageCostPerTB: 0 });
+    const expected = controlNodeSpec(bom.nodes);
+    expect(bom.ctrlVcpu).toBe(expected.vcpu);
+    expect(bom.ctrlRam).toBe(expected.ram);
   });
 
   it("rounds GPU count up to the next full 8-GPU node", () => {

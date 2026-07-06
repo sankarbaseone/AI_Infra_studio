@@ -48,7 +48,7 @@ main.jsx
      ├─ TokenTab                writes shared.effTokensT
      ├─ TrainingTab             reads shared.effTokensT (seeds tokensT), owns rest locally
      ├─ InferenceTab            writes shared.{inferGpu, inferGpus, aggregateTokPerSec, ...}
-     └─ TieredBomTab            reads `shared` but mostly runs its own independent 3-tier sizing
+     └─ TieredBomTab            reads `shared` for the "Your Configuration" 4th column; 3 fixed tiers stay independent
 ```
 
 All four tabs are mounted conditionally (`{tab === "x" && <Tab/>}`), so switching tabs
@@ -63,16 +63,21 @@ The "carry-forward" pattern is the whole app's data-flow design:
    `shared.effTokensT` via `useEffect`.
 2. **TrainingTab**: seeds its local `tokensT` from `shared.effTokensT || 2` (only on mount —
    not reactive afterward), runs the training-time model independently.
-3. **InferenceTab**: computes GPU sizing from concurrency inputs, pushes
-   `{inferGpu, inferGpus, aggregateTokPerSec, ...}` into `shared` via `useEffect`.
-4. **TieredBomTab**: is mostly **self-contained** — it does not consume `shared`. It
-   re-derives sizing per tier (Foundation/Standard/Enterprise) itself, in `computeTier()`,
-   using tier-fixed user counts (`usersMid`) rather than whatever the user configured in
-   InferenceTab. This is a known gap — see
-   [PRODUCT_BACKLOG.md — item 2](./PRODUCT_BACKLOG.md#2-fix-tieredbomtab--shared-state-disconnect).
+3. **InferenceTab**: computes GPU sizing from concurrency inputs, pushes a documented set of
+   fields into `shared` (see `src/lib/sharedSchema.js`'s `SharedState` typedef) — GPU
+   choice/count, aggregate throughput, model/precision/context, and (since the "Your
+   Configuration" feature) fabric and storage-capacity inputs InferenceTab collects itself.
+4. **TieredBomTab**: the 3 fixed tiers (Foundation/Standard/Enterprise) still compute
+   independently, in `computeTierFromInput()` fed by `tierToSizingInput()`, using tier-fixed
+   user counts (`usersMid`) — unchanged, per `DECISIONS.md` D3. A 4th column, **"Your
+   Configuration,"** is fed by `liveToSizingInput(shared, ...)` and reflects InferenceTab's
+   config live, gated by `isLiveConfigReady(shared)` (placeholder shown until ready). See
+   [DECISIONS.md — D10](./DECISIONS.md#d10) for the full resolution.
 
-State only flows forward (Token → Training → Inference), never backward, and `shared` is a
-flat object with no schema/validation — any tab can silently clobber keys.
+State only flows forward (Token → Training → Inference → BOM's live column), never backward.
+`shared` has a documented (but not runtime-enforced) shape via `src/lib/sharedSchema.js` —
+see [PRODUCT_BACKLOG.md — item 8](./PRODUCT_BACKLOG.md#8-add-a-lightweight-schema-for-shared-cross-tab-state)
+for what's still open there (full validation / TypeScript).
 
 ## State management
 
@@ -100,7 +105,10 @@ Pure, framework-free functions — the actual "engine":
   throughput, itself derived from HBM bandwidth ÷ bytes-per-param × 18 fudge factor for
   continuous batching) — and takes the max, tagging which constraint bound the result.
 - **BOM build** (`buildBom`): nodes = `ceil(GPUs/8)`, capex = node price + fabric cost +
-  storage cost + a flat $12k/node rack cost.
+  storage cost + a flat $12k/node rack cost. Also returns `ctrlVcpu`/`ctrlRam` via
+  `controlNodeSpec(nodes)` — HA control-plane sizing derived live from compute-node count
+  (floor 8 vCPU/64GB at 1 node, +4 vCPU/+32GB per additional node, capped at 64/1024),
+  replacing what used to be static per-tier constants in `reference.js`.
 - **Financing comparison**: 4-way — On-Prem (capex + 3yr power+support), Public Cloud
   (on-demand $/GPU-hr × 8760 × 3), GPU-as-a-Service (0.75× cloud rate), Colocation
   (capex + $/kW/month × 36) — cheapest flagged.
@@ -113,22 +121,33 @@ the codebase, and currently the highest-value target for automated test coverage
 
 ## BOM generation flow (`TieredBomTab.jsx`)
 
-For each of the 3 fixed tiers (`TIERS` in `reference.js` — Foundation 200-300 / Standard
-300-500 / Enterprise 500-800 users):
+`computeTierFromInput({ gpuKey, sized, fabricKey, storageTB, storageKey, region,
+utilizationPct, outTok })` is the shared engine call (`buildBom()` →
+`financingComparison()` → `unitEconomics()`) for **all 4 columns** — only how `sized`/
+`gpuKey`/`fabricKey`/`storageTB` are sourced differs, via two adapters:
 
-1. Pick vendor-specific default GPU (`VENDOR_TIER_DEFAULT[vendor][tier.key]`).
-2. Compute peak output tokens/sec from
-   `tier.usersMid × reqPerUserHr/3600 × peakFactor × outTok`.
-3. `sizeInference()` → GPU count → `buildBom()` → `financingComparison()` →
-   `unitEconomics()`.
-4. Render as a 7-layer matrix (Training, Inference, Token Processing, Storage, Control
-   Nodes, Network Fabric, Concurrent Users) × 3 tier columns, with per-tier financial detail
-   (CapEx, 3yr TCO, cost/1K tokens, cost/inference, 4-way financing table) below.
+- **`tierToSizingInput(tier, vendor, ...)`** — for each of the 3 fixed tiers (`TIERS` in
+  `reference.js` — Foundation 200-300 / Standard 300-500 / Enterprise 500-800 users): picks
+  the vendor-specific default GPU (`VENDOR_TIER_DEFAULT[vendor][tier.key]`), computes peak
+  output tokens/sec from `tier.usersMid × reqPerUserHr/3600 × peakFactor × outTok`, and calls
+  `sizeInference()` fresh.
+- **`liveToSizingInput(shared, ...)`** — for the "Your Configuration" 4th column: takes
+  `gpuKey`/GPU count/throughput directly from `shared` (already computed by InferenceTab) —
+  does **not** re-run `sizeInference()`, specifically to avoid two code paths that could
+  drift from the same underlying numbers.
 
-Switching the vendor toggle (NVIDIA↔AMD) re-runs `results = TIERS.map(...)` entirely, so
+Render as a 7-layer matrix (Training, Inference, Token Processing, Storage, Control Nodes,
+Network Fabric, Concurrent Users) × 4 columns, with per-column financial detail (CapEx, 3yr
+TCO, cost/1K tokens, cost/inference, 4-way financing table) below. The live column renders a
+placeholder (via an HTML `rowSpan`) until `isLiveConfigReady(shared)` is true.
+
+Switching the vendor toggle (NVIDIA↔AMD) re-runs the 3 fixed tiers' computation entirely, so
 every cell recomputes — this is the "functional neutrality" the README claims, and it holds
-up in the code (no hardcoded NVIDIA-only path). Vendor neutrality is a fixed, non-negotiable
-design constraint — see [DECISIONS.md — D1](./DECISIONS.md#d1).
+up in the code (no hardcoded NVIDIA-only path). The live column's *numbers* also recompute on
+toggle (its financing call still runs), but its `gpuKey` stays pinned to whatever GPU was
+picked in InferenceTab — a deliberate, documented exception (see
+[DECISIONS.md — D10](./DECISIONS.md#d10)). Vendor neutrality is otherwise a fixed,
+non-negotiable design constraint — see [DECISIONS.md — D1](./DECISIONS.md#d1).
 
 ## Cost calculation
 
@@ -152,21 +171,30 @@ rather than a confirmed-ready signal.
 
 See [PRODUCT_BACKLOG.md](./PRODUCT_BACKLOG.md) for the full, prioritized list. Summary:
 
-1. **TieredBomTab doesn't consume `shared` state** — the BOM tab's sizing silently ignores
-   the Inference tab's configuration, despite UI copy claiming otherwise.
-2. **No automated tests** — the calculation engine (the tool's actual IP) has zero test
-   coverage.
+1. ~~TieredBomTab doesn't consume `shared` state~~ — **Fixed 2026-07-06.** See
+   [DECISIONS.md — D10](./DECISIONS.md#d10).
+2. ~~No automated tests~~ — **Fixed 2026-07-06** for the calc/tco engine (52 tests via
+   Vitest). UI components (`tabs/*.jsx`) remain untested — no React component-test harness
+   exists in this project yet.
 3. **Workload-type multipliers are qualitative placeholders** shown next to fully-computed
    cost numbers — a real risk of being misread as calibrated fact (see
    [DECISIONS.md — D4](./DECISIONS.md#d4)).
 4. **Inline styles everywhere**, magic numbers embedded in `calc.js`/`tco.js` instead of
    named reference-data constants.
-5. **`shared` is an untyped bag** with no schema and no TypeScript anywhere in the project.
-6. **Git repo doesn't exist yet** — the "git-ready" packaging is aspirational until
-   `git init` is actually run.
+5. **`shared` has a documented shape now** (`src/lib/sharedSchema.js`, JSDoc typedef) but
+   still no runtime enforcement and no TypeScript anywhere in the project — see
+   [PRODUCT_BACKLOG.md — item 8](./PRODUCT_BACKLOG.md#8-add-a-lightweight-schema-for-shared-cross-tab-state).
+6. ~~Git repo doesn't exist yet~~ — **Fixed.** Repo is git-tracked (history currently lives
+   in a native-Linux working copy, `~/workspace/nydux`, not the Windows-mounted project
+   path — see `PROJECT_STATE.md`'s environment note and [DECISIONS.md — D9](./DECISIONS.md#d9)).
 7. **Hardcoded USD↔INR rate** and no active staleness enforcement beyond a passive caption.
 8. **PDF export duplicates rendering logic** with the on-screen table — a drift risk on any
-   future layer change.
+   future layer change. Partially mitigated for the 4th-column addition (both now iterate
+   the same `columns`/`results` shape), but still two separate render implementations.
+9. **A genuine financing-model discrepancy was found while writing the calc/tco test
+   suite:** `financingComparison`'s `cheapestKey` never resolves to `onPrem` or `cloud`
+   under current constants — see [PRODUCT_BACKLOG.md — item 3](./PRODUCT_BACKLOG.md#3-add-automated-test-suite-for-the-calculation-engine)
+   for the full finding. Not fixed; flagged for Sankar's decision.
 
 No code was modified in producing this document — it is a description of the codebase as it
 stands.

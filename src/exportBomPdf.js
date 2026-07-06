@@ -1,11 +1,16 @@
 import { DELOITTE_LOGO } from "./theme.js";
-import { GPUS, VENDOR_TIER_DEFAULT, STORAGE, FABRICS } from "./data/reference.js";
+import { GPUS, FABRICS } from "./data/reference.js";
 import { fmt, usdSmall } from "./lib/format.js";
 
-export function exportTieredBomPdf({ client, vendor, tiers, results, storageTB, region, cur, usd, inr }) {
+export function exportTieredBomPdf({ client, vendor, columns, results, liveReady, region, cur, usd, inr }) {
   const date = new Date().toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
 
-  const colHeaders = tiers.map((t) => `<th>${t.label}<br/><span style="font-weight:400;font-size:10px">${t.usersMin}-${t.usersMax} users</span></th>`).join("");
+  // Only include the live "Your Configuration" column when it's actually populated \u2014 never
+  // print a placeholder/"not configured" column in a client-facing PDF.
+  const cols = liveReady ? columns : columns.slice(0, 3);
+  const rows = liveReady ? results : results.slice(0, 3);
+
+  const colHeaders = cols.map((c) => `<th>${c.label}<br/><span style="font-weight:400;font-size:10px">${c.sub}</span></th>`).join("");
 
   function row(label, cells, remark) {
     return "<tr><td class=\"layer\">" + label + "</td>" +
@@ -14,15 +19,15 @@ export function exportTieredBomPdf({ client, vendor, tiers, results, storageTB, 
   }
 
   const rowsHtml =
-    row("Training", results.map((r) => r.bom.provisioned + "\u00d7 " + GPUS[VENDOR_TIER_DEFAULT[vendor][r.tier.key]].name), "Shared pool sized to concurrent serving demand.") +
-    row("Inference", results.map((r) => r.bom.provisioned + "\u00d7 " + GPUS[VENDOR_TIER_DEFAULT[vendor][r.tier.key]].name + ", " + GPUS[VENDOR_TIER_DEFAULT[vendor][r.tier.key]].hbm + " GB VRAM"), "Sized live from concurrent users, context length and precision.") +
-    row("Token Processing", results.map((r) => "~" + fmt(r.aggregateTokPerSec) + " tok/s aggregate"), "Memory-bandwidth-bound estimate.") +
-    row("Storage", results.map((r, i) => fmt(storageTB[i]) + " TB"), "Capacity only \u2014 throughput sizing is part of the detailed engagement.") +
-    row("Control Nodes", results.map((r) => "3\u00d7 nodes (HA cluster)"), "Standard HA control-plane sizing default.") +
-    row("Network Fabric", results.map((r) => FABRICS[r.tier.fabricDefault].name), "Fabric choice directly affects achievable MFU.") +
-    row("Concurrent Users", results.map((r) => r.tier.usersMin + "\u2013" + r.tier.usersMax), "Fixed tier bands.") +
-    row("3-Year TCO (on-prem)", results.map((r) => usd(r.fin.onPrem.total3yr)), "CapEx + power + support over 3 years.") +
-    row("Cost / 1K tokens", results.map((r) => usdSmall(r.unit.costPerToken * 1000)), "At configured average utilization.");
+    row("Training", rows.map((r) => r.bom.provisioned + "\u00d7 " + GPUS[r.gpuKey].name), "Shared pool sized to concurrent serving demand.") +
+    row("Inference", rows.map((r) => r.bom.provisioned + "\u00d7 " + GPUS[r.gpuKey].name + ", " + GPUS[r.gpuKey].hbm + " GB VRAM"), "Sized live from concurrent users, context length and precision.") +
+    row("Token Processing", rows.map((r) => "~" + fmt(r.aggregateTokPerSec) + " tok/s aggregate"), "Memory-bandwidth-bound estimate.") +
+    row("Storage", rows.map((r) => fmt(r.storageTB) + " TB"), "Capacity only \u2014 throughput sizing is part of the detailed engagement.") +
+    row("Control Nodes", rows.map(() => "3\u00d7 nodes (HA cluster)"), "Standard HA control-plane sizing default.") +
+    row("Network Fabric", rows.map((r) => FABRICS[r.fabricKey].name), "Fabric choice directly affects achievable MFU.") +
+    row("Concurrent Users", cols.map((c) => c.sub), "Fixed tier bands; Your Configuration reflects the exact input.") +
+    row("3-Year TCO (on-prem)", rows.map((r) => usd(r.fin.onPrem.total3yr)), "CapEx + power + support over 3 years.") +
+    row("Cost / 1K tokens", rows.map((r) => usdSmall(r.unit.costPerToken * 1000)), "At configured average utilization.");
 
   const html =
     "<html><head><title>Deloitte AI Infra Studio \u2014 Tiered BOM</title><style>" +

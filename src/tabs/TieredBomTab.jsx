@@ -9,15 +9,38 @@ import { fmt, usd, inr, fmtTok, usdSmall } from "../lib/format.js";
 import { sizeInference } from "../lib/calc.js";
 import { buildBom, financingComparison, unitEconomics } from "../lib/tco.js";
 import { exportTieredBomPdf } from "../exportBomPdf.js";
+import { isLiveConfigReady } from "../lib/sharedSchema.js";
 
-function computeTier(tier, { model, gpuKey, prec, ctx, reqPerUserHr, outTok, peakFactor, storageTB, storageKey, region, utilizationPct, fabricKey }) {
-  const peakOutTokPerSec = tier.usersMid * (reqPerUserHr / 3600) * peakFactor * outTok;
-  const sized = sizeInference({ model, gpuKey, prec, peakOutTokPerSec, ctx });
+/** Costs + sizing for one BOM column, given a resolved gpuKey and sizing result. Identical
+ * body regardless of whether `sized` came from a fresh sizeInference() call (fixed tiers) or
+ * was passed through from InferenceTab's own already-computed result (live column). */
+function computeTierFromInput({ gpuKey, sized, fabricKey, storageTB, storageKey, region, utilizationPct, outTok }) {
   const bom = buildBom({ gpuKey, gpuCount: sized.gpusNeeded, fabricKey, storageTB, storageCostPerTB: STORAGE[storageKey].costPerTB });
   const fin = financingComparison({ bom, gpuKey, region });
   const aggregateTokPerSec = sized.perGpuTps * bom.provisioned;
   const unit = unitEconomics({ tco3yrUsd: fin.onPrem.total3yr, aggregateTokPerSec, utilizationPct, outTokPerRequest: outTok });
-  return { tier, sized, bom, fin, aggregateTokPerSec, unit };
+  return { gpuKey, sized, bom, fin, aggregateTokPerSec, unit, storageTB, fabricKey };
+}
+
+/** Adapter: a fixed tier's own usersMid + the BOM tab's shared model/precision/context inputs. */
+function tierToSizingInput(tier, vendor, { model, prec, ctx, reqPerUserHr, outTok, peakFactor, storageTB, storageKey, region, utilizationPct }) {
+  const gpuKey = VENDOR_TIER_DEFAULT[vendor][tier.key];
+  const peakOutTokPerSec = tier.usersMid * (reqPerUserHr / 3600) * peakFactor * outTok;
+  const sized = sizeInference({ model, gpuKey, prec, peakOutTokPerSec, ctx });
+  return { gpuKey, sized, fabricKey: tier.fabricDefault, storageTB, storageKey, region, utilizationPct, outTok };
+}
+
+/** Adapter: the live column. GPU count/throughput come straight from InferenceTab's own
+ * already-computed `shared` values — not re-derived — so there's no second code path that
+ * could drift from InferenceTab's own numbers. Vendor toggle intentionally does NOT affect
+ * gpuKey here (see docs/DECISIONS.md D10) — it reflects a specific choice made elsewhere. */
+function liveToSizingInput(shared, { storageKey, region, utilizationPct }) {
+  const sized = { gpusNeeded: shared.inferGpus, perGpuTps: shared.perGpuTps, bound: shared.bound };
+  return {
+    gpuKey: shared.inferGpu, sized,
+    fabricKey: shared.inferFabricKey, storageTB: shared.inferStorageTB,
+    storageKey, region, utilizationPct, outTok: shared.outTok,
+  };
 }
 
 export default function TieredBomTab({ shared }) {
@@ -40,36 +63,68 @@ export default function TieredBomTab({ shared }) {
 
   const toggleWorkload = (k) => setWorkloads((w) => (w.includes(k) ? w.filter((x) => x !== k) : [...w, k]));
 
-  const results = TIERS.map((tier, i) => {
-    const gpuKey = VENDOR_TIER_DEFAULT[vendor][tier.key];
-    const fabricKey = tier.fabricDefault;
-    return computeTier(tier, {
-      model, gpuKey, prec, ctx, reqPerUserHr, outTok, peakFactor,
-      storageTB: storageTB[i], storageKey, region, utilizationPct, fabricKey,
+  const liveReady = isLiveConfigReady(shared);
+
+  const tierResults = TIERS.map((tier, i) => {
+    const input = tierToSizingInput(tier, vendor, {
+      model, prec, ctx, reqPerUserHr, outTok, peakFactor,
+      storageTB: storageTB[i], storageKey, region, utilizationPct,
     });
+    return computeTierFromInput(input);
   });
+  const liveResult = liveReady
+    ? computeTierFromInput(liveToSizingInput(shared, { storageKey, region, utilizationPct }))
+    : { placeholder: true };
+  const allResults = [...tierResults, liveResult];
+
+  // Column headers: 3 fixed tiers + the live column, in one shape so header/chip rendering
+  // doesn't need to special-case tier-vs-live.
+  const columns = [
+    ...TIERS.map((t) => ({ key: t.key, label: t.label, sub: `${t.usersMin}–${t.usersMax} users` })),
+    { key: "live", label: "Your Configuration", sub: liveReady ? `${shared.users} users` : "" },
+  ];
+
+  // Defensive: if the live column was selected and then InferenceTab config becomes
+  // unavailable again, fall back to a real tier for the financial-detail panel below.
+  const effectiveSelectedIdx = selectedTierIdx === 3 && !liveReady ? 1 : selectedTierIdx;
 
   const workloadNotes = workloads.map((k) => WORKLOAD_TYPES[k].note);
 
-  const colWidth = "1fr";
   const cur = region === "in" ? inr : usd;
 
-  const layerRow = (label, cells, remark) => (
-    <tr style={{ borderTop: `1px solid ${C.grayLt}` }}>
-      <td style={{ padding: "10px 12px", fontWeight: 700, color: C.white, background: C.ink, fontSize: 12.5, whiteSpace: "nowrap" }}>{label}</td>
-      {cells.map((c, i) => (
-        <td key={i} style={{ padding: "10px 12px", fontSize: 12, color: C.grayDk, verticalAlign: "top", background: i === selectedTierIdx ? "#EEF6E2" : C.white }}>{c}</td>
-      ))}
-      <td style={{ padding: "10px 12px", fontSize: 11, color: C.grayMd, fontStyle: "italic", verticalAlign: "top" }}>{remark}</td>
-    </tr>
-  );
+  function layerRow(label, tierCells, liveCell, remark, firstRow) {
+    return (
+      <tr style={{ borderTop: `1px solid ${C.grayLt}` }}>
+        <td style={{ padding: "10px 12px", fontWeight: 700, color: C.white, background: C.ink, fontSize: 12.5, whiteSpace: "nowrap" }}>{label}</td>
+        {tierCells.map((c, i) => (
+          <td key={i} style={{ padding: "10px 12px", fontSize: 12, color: C.grayDk, verticalAlign: "top", background: i === effectiveSelectedIdx ? "#EEF6E2" : C.white }}>{c}</td>
+        ))}
+        {liveReady ? (
+          <td style={{
+            padding: "10px 12px", fontSize: 12, color: C.grayDk, verticalAlign: "top",
+            background: effectiveSelectedIdx === 3 ? "#EEF6E2" : C.white, borderLeft: `2px solid ${C.green}`,
+          }}>{liveCell}</td>
+        ) : firstRow ? (
+          <td rowSpan={7} style={{
+            padding: 16, fontSize: 12.5, color: C.grayMd, textAlign: "center", verticalAlign: "middle",
+            borderLeft: `2px dashed ${C.grayLt}`, background: C.grayXlt,
+          }}>
+            Configure the Inference tab to populate this column.
+            <div style={{ marginTop: 6, fontSize: 11, color: C.teal, fontWeight: 600 }}>Go to Inference tab to configure →</div>
+          </td>
+        ) : null}
+        <td style={{ padding: "10px 12px", fontSize: 11, color: C.grayMd, fontStyle: "italic", verticalAlign: "top" }}>{remark}</td>
+      </tr>
+    );
+  }
 
   return (
     <div>
       <SectionTitle eyebrow="Deliverable · Tiered" title="Multi-Layer BOM & TCO" />
       <p style={{ fontSize: 13, color: C.grayDk, marginTop: -8, marginBottom: 16, maxWidth: 900 }}>
         Foundation / Standard / Enterprise sizing computed from the same engine as the other tabs — not static reference
-        numbers. Every cell is derived live from your inputs below.
+        numbers. Every cell is derived live from your inputs below. The 4th column, "Your Configuration," reflects
+        whatever you've configured on the Inference tab.
       </p>
 
       {/* Inputs */}
@@ -132,12 +187,14 @@ export default function TieredBomTab({ shared }) {
           <thead>
             <tr>
               <th style={{ padding: "10px 12px", background: C.ink, color: C.white, fontSize: 12, textAlign: "left" }}>Layer</th>
-              {TIERS.map((t, i) => (
-                <th key={t.key} onClick={() => setSelectedTierIdx(i)} style={{
-                  padding: "10px 12px", background: i === selectedTierIdx ? C.green : C.teal, color: C.white,
-                  fontSize: 12.5, textAlign: "left", cursor: "pointer",
+              {columns.map((col, i) => (
+                <th key={col.key} onClick={() => setSelectedTierIdx(i)} style={{
+                  padding: "10px 12px",
+                  background: i === effectiveSelectedIdx ? C.green : (col.key === "live" ? C.grayDk : C.teal),
+                  color: C.white, fontSize: 12.5, textAlign: "left", cursor: "pointer",
+                  borderLeft: col.key === "live" ? `2px solid ${liveReady ? C.green : C.grayLt}` : undefined,
                 }}>
-                  {t.label}<div style={{ fontWeight: 400, fontSize: 10.5 }}>{t.usersMin}–{t.usersMax} users</div>
+                  {col.label}<div style={{ fontWeight: 400, fontSize: 10.5 }}>{col.sub}</div>
                 </th>
               ))}
               <th style={{ padding: "10px 12px", background: C.ink, color: C.white, fontSize: 12, textAlign: "left" }}>Remark</th>
@@ -145,32 +202,40 @@ export default function TieredBomTab({ shared }) {
           </thead>
           <tbody>
             {layerRow("Training",
-              results.map((r) => `${r.bom.provisioned}× ${GPUS[VENDOR_TIER_DEFAULT[vendor][r.tier.key]].name}\n${r.bom.node.hostCpu}, ${fmt(r.bom.node.ram)} GB RAM`),
-              "Shared pool sized to concurrent serving demand; add dedicated capacity for concurrent fine-tuning."
+              tierResults.map((r) => `${r.bom.provisioned}× ${GPUS[r.gpuKey].name}\n${r.bom.node.hostCpu}, ${fmt(r.bom.node.ram)} GB RAM`),
+              liveReady && `${liveResult.bom.provisioned}× ${GPUS[liveResult.gpuKey].name}\n${liveResult.bom.node.hostCpu}, ${fmt(liveResult.bom.node.ram)} GB RAM`,
+              "Shared pool sized to concurrent serving demand; add dedicated capacity for concurrent fine-tuning.",
+              true
             )}
             {layerRow("Inference",
-              results.map((r) => `${r.bom.provisioned}× ${GPUS[VENDOR_TIER_DEFAULT[vendor][r.tier.key]].name}\n${GPUS[VENDOR_TIER_DEFAULT[vendor][r.tier.key]].hbm} GB VRAM each`),
+              tierResults.map((r) => `${r.bom.provisioned}× ${GPUS[r.gpuKey].name}\n${GPUS[r.gpuKey].hbm} GB VRAM each`),
+              liveReady && `${liveResult.bom.provisioned}× ${GPUS[liveResult.gpuKey].name}\n${GPUS[liveResult.gpuKey].hbm} GB VRAM each`,
               "Sized live from concurrent users, context length and precision — not a static reference number."
             )}
             {layerRow("Token Processing (capacity)",
-              results.map((r) => `~${fmt(r.aggregateTokPerSec)} tok/s aggregate\n${fmt(r.sized.perGpuTps)} tok/s/GPU · ${r.bom.provisioned} GPUs`),
-              `Memory-bandwidth-bound estimate; ${results[selectedTierIdx].sized.bound} at the selected tier.`
+              tierResults.map((r) => `~${fmt(r.aggregateTokPerSec)} tok/s aggregate\n${fmt(r.sized.perGpuTps)} tok/s/GPU · ${r.bom.provisioned} GPUs`),
+              liveReady && `~${fmt(liveResult.aggregateTokPerSec)} tok/s aggregate\n${fmt(liveResult.sized.perGpuTps)} tok/s/GPU · ${liveResult.bom.provisioned} GPUs`,
+              `Memory-bandwidth-bound estimate; ${allResults[effectiveSelectedIdx].sized.bound} at the selected column.`
             )}
             {layerRow("Storage",
-              results.map((r, i) => `${fmt(storageTB[i])} TB\n${STORAGE[storageKey].name}`),
+              tierResults.map((r) => `${fmt(r.storageTB)} TB\n${STORAGE[storageKey].name}`),
+              liveReady && `${fmt(liveResult.storageTB)} TB\n${STORAGE[storageKey].name}`,
               "Capacity only — throughput (GB/s) sizing is part of the detailed engagement."
             )}
             {layerRow("Control Nodes",
-              TIERS.map((t) => `3× nodes (HA cluster)\n${t.ctrlVcpu} vCPU · ${t.ctrlRam} GB RAM each`),
-              "Standard HA control-plane sizing default."
+              tierResults.map((r) => `3× nodes (HA cluster)\n${r.bom.ctrlVcpu} vCPU · ${r.bom.ctrlRam} GB RAM each`),
+              liveReady && `3× nodes (HA cluster)\n${liveResult.bom.ctrlVcpu} vCPU · ${liveResult.bom.ctrlRam} GB RAM each`,
+              "HA control-plane sizing, derived live from GPU compute-node count."
             )}
             {layerRow("Network Fabric",
               TIERS.map((t) => `${FABRICS[t.fabricDefault].name}\n${FABRICS[t.fabricDefault].note}`),
+              liveReady && `${FABRICS[shared.inferFabricKey].name}\n${FABRICS[shared.inferFabricKey].note}`,
               "Fabric choice directly affects achievable MFU — see Training tab."
             )}
             {layerRow("Concurrent Users",
               TIERS.map((t) => `${t.usersMin}–${t.usersMax}`),
-              "Fixed tier bands; contact the COE for flexible/custom-band sizing."
+              liveReady && `${shared.users}`,
+              "Fixed tier bands; Your Configuration reflects the Inference tab's exact input."
             )}
           </tbody>
         </table>
@@ -178,12 +243,12 @@ export default function TieredBomTab({ shared }) {
 
       {/* Per-tier financial detail */}
       <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
-        {TIERS.map((t, i) => (
-          <Chip key={t.key} active={i === selectedTierIdx} onClick={() => setSelectedTierIdx(i)}>{t.label} financials</Chip>
+        {columns.filter((col, i) => i < 3 || liveReady).map((col, i) => (
+          <Chip key={col.key} active={i === effectiveSelectedIdx} onClick={() => setSelectedTierIdx(i)}>{col.label} financials</Chip>
         ))}
       </div>
       {(() => {
-        const r = results[selectedTierIdx];
+        const r = allResults[effectiveSelectedIdx];
         return (
           <>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 12, marginBottom: 14 }}>
@@ -194,7 +259,7 @@ export default function TieredBomTab({ shared }) {
             </div>
             <div style={{ ...card, padding: 0, overflow: "hidden", marginBottom: 14 }}>
               <div style={{ background: C.ink, color: C.white, padding: "10px 16px", fontSize: 13, fontWeight: 700 }}>
-                Financing comparison — {TIERS[selectedTierIdx].label} tier, 3-year, 24×7
+                Financing comparison — {columns[effectiveSelectedIdx].label}, 3-year, 24×7
               </div>
               <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
                 <thead>
@@ -214,7 +279,7 @@ export default function TieredBomTab({ shared }) {
               </table>
             </div>
             <button
-              onClick={() => exportTieredBomPdf({ client, vendor, tiers: TIERS, results, storageTB, region, cur: region === "in" ? inr : usd, usd, inr })}
+              onClick={() => exportTieredBomPdf({ client, vendor, columns, results: allResults, liveReady, region, cur: region === "in" ? inr : usd, usd, inr })}
               style={{ background: C.green, color: C.white, border: "none", borderRadius: 6, padding: "8px 16px", fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
               Export Tiered BOM to PDF
             </button>

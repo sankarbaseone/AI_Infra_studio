@@ -29,6 +29,19 @@ updated at the end of every working session per Roadmap §9.4.
 - **Discrepancy found and documented (not fixed):** `financingComparison`'s `cheapestKey`
   never resolves to `onPrem` or `cloud` under current constants — see `PRODUCT_BACKLOG.md`
   item 3 for the full finding and `src/lib/tco.test.js` for the pinned proof.
+- **"Your Configuration" live BOM column** (resolves Backlog #2 / `DECISIONS.md` D10):
+  `TieredBomTab.jsx` now renders a 4th column wired live to `shared`, alongside the
+  unchanged Foundation/Standard/Enterprise tiers. New `src/lib/sharedSchema.js`
+  (`isLiveConfigReady()`, partially resolves Backlog #8). `InferenceTab.jsx`'s "flows into
+  the BOM & TCO tab" copy corrected to name the live column specifically, and gained two new
+  real inputs — Network fabric and Storage capacity (TB) — that it previously didn't collect
+  at all. **Scope amendment during planning:** control-node vCPU/RAM sizing changed from a
+  static per-tier constant to a formula keyed by GPU compute-node count
+  (`controlNodeSpec()` in `lib/tco.js`), applied uniformly to all 4 columns — this is an
+  intentional, scoped exception to "no behavior change to the 3 fixed tiers" (their
+  `ctrlVcpu`/`ctrlRam` values now come from the formula, not the old static constants; every
+  other field is unchanged). 5 new tests added for `controlNodeSpec()`; 52 tests total, all
+  passing. `npm run build` clean (42 modules).
 
 ## [2.0.0] — v2.0 build (packaged 2026-07-05)
 

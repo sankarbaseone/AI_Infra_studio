@@ -29,6 +29,22 @@ Sorted in recommended implementation order. Cross-references
 ---
 
 ### 2. Fix TieredBomTab / `shared` state disconnect
+- **Status:** Done (2026-07-06) — implemented per the "Your Configuration" Live Column spec,
+  with a scope amendment (see [DECISIONS.md D10](./DECISIONS.md#d10) for full detail).
+  `TieredBomTab.jsx` now renders a 4th column wired to `shared` via `src/lib/sharedSchema.js`
+  (`isLiveConfigReady()`), with a placeholder state until InferenceTab is configured.
+  `InferenceTab.jsx`'s copy is corrected. Fabric and storage-capacity became new, real
+  InferenceTab inputs (previously it had neither); control-node vCPU/RAM sizing became a
+  node-count-keyed formula (`controlNodeSpec()` in `tco.js`) applied to all 4 columns,
+  replacing static per-tier constants that never actually reflected real node count. The 3
+  fixed tiers' `usersMid` bands are unchanged (D3 preserved). Verified via `npm test` (52/52
+  passing, including 5 new `controlNodeSpec` tests) and a Node-script sanity pass exercising
+  the full computation path for both fixed tiers and the live column with realistic default
+  inputs (zero NaN/Infinity, live `aggregateTokPerSec` confirmed matching `shared` exactly —
+  no drift between the two adapters). **Not automatically verified: a live in-browser
+  walkthrough** — headless Chromium couldn't be installed in this sandboxed environment
+  (missing system shared libraries, `sudo` unavailable non-interactively). Recommend a manual
+  click-through before the next client demo.
 - **Priority:** Critical
 - **Business value:** InferenceTab's UI explicitly tells the user "flows into the BOM & TCO
   tab," but `TieredBomTab.jsx` never reads `shared` — it recomputes its own sizing from
@@ -168,6 +184,13 @@ Sorted in recommended implementation order. Cross-references
 ---
 
 ### 8. Add a lightweight schema for `shared` cross-tab state
+- **Status:** Partially done (2026-07-06) — `src/lib/sharedSchema.js` added with a JSDoc
+  `SharedState` typedef and `isLiveConfigReady()`, scoped to what the "Your Configuration"
+  live column needs (per Backlog item 2 / DECISIONS.md D10). This documents the fields
+  `InferenceTab.jsx` writes and `TieredBomTab.jsx` reads, but is **not** a runtime-enforced
+  schema (no validation library) and does **not** cover `TokenTab.jsx`'s `effTokensT` →
+  `TrainingTab.jsx` handoff. The larger option this item originally scoped (PropTypes across
+  all tabs, or full TypeScript migration) remains open.
 - **Priority:** Medium
 - **Business value:** `shared` is a flat, untyped object mutated via spread across three
   tabs with no schema — nothing prevents a future tab from silently depending on a key

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { C } from "../theme.js";
-import { GPUS, MODELS } from "../data/reference.js";
+import { GPUS, MODELS, FABRICS } from "../data/reference.js";
 import { card, Field, NumIn, Sel, Stat, SectionTitle } from "../components/ui.jsx";
 import { fmt } from "../lib/format.js";
 import { kvCacheGB, sizeInference } from "../lib/calc.js";
@@ -16,6 +16,8 @@ export default function InferenceTab({ shared, setShared }) {
   const [outTok, setOutTok] = useState(500);
   const [ctx, setCtx] = useState(8192);
   const [peakFactor, setPeakFactor] = useState(3);
+  const [fabric, setFabric] = useState("ib");
+  const [storageTB, setStorageTB] = useState(10);
 
   const model = { ...MODELS[modelKey] };
   if (modelKey === "custom") model.params = customP;
@@ -29,8 +31,16 @@ export default function InferenceTab({ shared, setShared }) {
   const nodes = Math.ceil(sized.gpusNeeded / 8);
 
   useEffect(() => {
-    setShared((s) => ({ ...s, inferGpu: gpu, inferGpus: nodes * 8, inferModel: model.name, users, outTok, prec, aggregateTokPerSec: sized.perGpuTps * nodes * 8 }));
-  }, [gpu, nodes, users, model.name, outTok, prec]); // eslint-disable-line
+    setShared((s) => ({
+      ...s,
+      inferGpu: gpu, inferGpus: nodes * 8, inferModel: model.name, users, outTok, prec,
+      aggregateTokPerSec: sized.perGpuTps * nodes * 8,
+      perGpuTps: sized.perGpuTps, bound: sized.bound,
+      model: modelKey, precision: prec, contextWindow: ctx,
+      reqPerUserHr, peakFactor,
+      inferFabricKey: fabric, inferStorageTB: storageTB,
+    }));
+  }, [gpu, nodes, users, model.name, outTok, prec, modelKey, ctx, reqPerUserHr, peakFactor, fabric, storageTB, sized.perGpuTps, sized.bound]); // eslint-disable-line
 
   return (
     <div>
@@ -57,6 +67,10 @@ export default function InferenceTab({ shared, setShared }) {
           <Field label="Output tokens / request"><NumIn value={outTok} onChange={setOutTok} step={50} min={0} /></Field>
           <Field label="Context window (tokens)"><NumIn value={ctx} onChange={setCtx} step={1024} min={0} /></Field>
           <Field label="Peak-to-average factor" hint="Headroom for burst load"><NumIn value={peakFactor} onChange={setPeakFactor} step={1} min={1} /></Field>
+          <Field label="Network fabric" hint={FABRICS[fabric].note}>
+            <Sel value={fabric} onChange={setFabric} options={Object.keys(FABRICS).map((k) => ({ v: k, l: FABRICS[k].name }))} />
+          </Field>
+          <Field label="Storage capacity (TB)"><NumIn value={storageTB} onChange={setStorageTB} step={10} min={0} /></Field>
         </div>
         <div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
@@ -71,7 +85,8 @@ export default function InferenceTab({ shared, setShared }) {
             {model.kvHeads < model.heads ? ` (GQA ${model.kvHeads}:${model.heads} already reduces this).` : "."}
           </div>
           <div style={{ ...card, background: C.grayXlt, fontSize: 12, color: C.grayDk, marginTop: 12 }}>
-            <b>Carry forward:</b> <b>{nodes * 8}× {g.name}</b> ({nodes} node{nodes > 1 ? "s" : ""}) flows into the BOM & TCO tab.
+            <b>Carry forward:</b> this configuration (<b>{nodes * 8}× {g.name}</b>, {nodes} node{nodes > 1 ? "s" : ""}) populates the
+            {" "}<b>"Your Configuration"</b> column on the BOM &amp; TCO tab.
           </div>
         </div>
       </div>

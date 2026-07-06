@@ -1,5 +1,18 @@
 import { NODES, FABRICS, CLOUD_HR, USD_INR, PUE_DEFAULT, KWH_USD, KWH_INR, SUPPORT_PCT, TCO_YEARS, GAAS_DISCOUNT, COLO_PER_KW_MONTH } from "../data/reference.js";
 
+/**
+ * HA control-plane sizing per replica node, as a function of GPU compute node count.
+ * Floor (1 compute node) matches the tool's original Foundation-tier assumption (8 vCPU /
+ * 64 GB); scales +4 vCPU / +32 GB per additional compute node, capped at 64 vCPU / 1024 GB
+ * for very large clusters. Internal COE planning assumption, not sourced from a vendor doc —
+ * same status as the $12k/node rack cost or the 85%-usable-HBM constant elsewhere in calc.js.
+ */
+export function controlNodeSpec(nodes) {
+  const vcpu = Math.min(64, 8 + 4 * Math.max(0, nodes - 1));
+  const ram = Math.min(1024, 64 + 32 * Math.max(0, nodes - 1));
+  return { vcpu, ram };
+}
+
 /** Build the costed BOM line items + power/TCO figures for one hardware config. */
 export function buildBom({ gpuKey, gpuCount, fabricKey, storageTB, storageCostPerTB, pue = PUE_DEFAULT }) {
   const node = NODES[gpuKey];
@@ -16,8 +29,9 @@ export function buildBom({ gpuKey, gpuCount, fabricKey, storageTB, storageCostPe
   const totalKw = itKw * pue;
   const annualKwh = totalKw * 8760;
   const annualSupport = hwCost * SUPPORT_PCT;
+  const { vcpu: ctrlVcpu, ram: ctrlRam } = controlNodeSpec(nodes);
 
-  return { node, nodes, provisioned, hwCost, fabricCost, storageCost, rackCost, capex, itKw, totalKw, annualKwh, annualSupport };
+  return { node, nodes, provisioned, hwCost, fabricCost, storageCost, rackCost, capex, itKw, totalKw, annualKwh, annualSupport, ctrlVcpu, ctrlRam };
 }
 
 /** 4-way financing comparison: On-Prem, Cloud rental, GPU-as-a-Service, Colocation. */
