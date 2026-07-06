@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { buildBom, financingComparison, unitEconomics, controlNodeSpec } from "./tco.js";
 import {
-  NODES, FABRICS, PUE_DEFAULT, USD_INR, KWH_INR, TCO_YEARS, GAAS_DISCOUNT,
+  NODES, FABRICS, PUE_DEFAULT, USD_INR, KWH_USD, KWH_INR, TCO_YEARS, GAAS_DISCOUNT,
   CLOUD_HR, COLO_PER_KW_MONTH,
 } from "../data/reference.js";
 
@@ -106,10 +106,10 @@ describe("financingComparison", () => {
     expect(fin.gaas.total3yr).toBeCloseTo(fin.cloud.total3yr * GAAS_DISCOUNT, 2);
   });
 
-  it("Colocation: exact formula = capex + totalKw * $150/kW/month * 36 months", () => {
+  it("Colocation: exact formula = capex + (totalKw * $150/kW/month * 12 + annualSupport) * 3 years", () => {
     const bom = buildBom({ gpuKey: "h100", gpuCount: 128, fabricKey: "ib", storageTB: 100, storageCostPerTB: 700 });
     const fin = financingComparison({ bom, gpuKey: "h100", region: "us" });
-    const expected = bom.capex + bom.totalKw * COLO_PER_KW_MONTH * 36;
+    const expected = bom.capex + (bom.totalKw * COLO_PER_KW_MONTH * 12 + bom.annualSupport) * TCO_YEARS;
     expect(fin.colo.total3yr).toBeCloseTo(expected, 4);
   });
 
@@ -144,24 +144,24 @@ describe("financingComparison", () => {
     expect(effectiveUsdPerKwh).toBeCloseTo(KWH_INR / USD_INR, 6);
   });
 
-  describe("cheapest-flagging — documented current behavior (2026-07-06 discrepancy note)", () => {
-    // FINDING (empirically verified via a sweep across all 6 GPUs x 2 regions x 3 GPU
-    // counts x 3 storage configs — see PR description): under the CURRENT constants,
-    // "onPrem" and "cloud" NEVER win cheapestKey. Only "colo" and "gaas" are ever flagged
-    // cheapest. This is a structural property of the formulas, not a fluke of any one input:
+  describe("cheapest-flagging — post-fix behavior (2026-07-06 colo support-cost fix)", () => {
+    // Prior to the fix, "colo" was mathematically guaranteed to beat "onPrem" in every
+    // scenario, because colo3 never carried annualSupport while onPremTco3 always did —
+    // a missing line item, not a real facility-cost advantage (PRODUCT_BACKLOG.md #3).
+    // With the fix, both formulas carry annualSupport symmetrically, so the comparison is
+    // now decided purely by real power cost (onPrem) vs. the flat colo hosting-fee
+    // equivalent (colo) — exactly as it should be.
     //
-    //  - "cloud" can mathematically never be cheapest, because gaas = 0.75 x cloud is
-    //    always strictly less than cloud whenever both are computed from the same bom —
-    //    gaas will always undercut it.
-    //  - "onPrem" loses to "colo" for every current GPU/node profile in NODES, in both
-    //    regions, because SUPPORT_PCT (10%/yr of hardware cost) plus power cost consistently
-    //    exceeds COLO_PER_KW_MONTH's flat hosting-fee equivalent for these price/power
-    //    ratios. Since capex is identical in both formulas, this comparison is actually
-    //    independent of GPU count and storage — it depends only on gpuKey and region.
-    //
-    // Per the spec's instruction: this is not fixed here. It's pinned as current behavior
-    // and flagged for Sankar to decide whether the SUPPORT_PCT/COLO_PER_KW_MONTH constants
-    // need recalibration, or whether this is working as intended.
+    // Empirically re-swept post-fix (all 6 GPU keys x 2 regions x 3 GPU counts x 2 storage
+    // configs): "onPrem" now wins in every case under current constants, because
+    // COLO_PER_KW_MONTH's annualized rate ($1,800/kW/yr) exceeds actual electricity cost
+    // per kW in both regions (~$1,051/kW/yr in the US, ~$839/kW/yr in India) once support
+    // cancels out of the comparison. "gaas" still surfaces once capex is driven high enough
+    // (e.g. by storage) that onPrem/colo both inherit that capex while cloud/gaas — priced
+    // purely off GPU count — don't. This means "colo" itself doesn't win under current
+    // constants either, which is a separate, new observation worth a look (not this spec's
+    // scope — this fix only removed the missing cost item; it did not tune
+    // COLO_PER_KW_MONTH). "cloud" still never wins, unaffected by this fix (see below).
 
     it("GPU-as-a-Service always undercuts Public Cloud — 'cloud' can never be cheapestKey", () => {
       const bom = buildBom({ gpuKey: "b200", gpuCount: 64, fabricKey: "roce800", storageTB: 50, storageCostPerTB: 1600 });
@@ -170,19 +170,29 @@ describe("financingComparison", () => {
       expect(fin.cheapestKey).not.toBe("cloud");
     });
 
-    it("Colocation beats On-Premises for every current GPU/node profile, in both regions", () => {
+    it("Colo and On-Prem now carry annualSupport symmetrically — the gap is purely the facility-cost difference", () => {
       const gpuKeys = Object.keys(CLOUD_HR); // all 6 GPU keys with a defined cloud rate
       for (const gpuKey of gpuKeys) {
         for (const region of ["us", "in"]) {
           const bom = buildBom({ gpuKey, gpuCount: 128, fabricKey: "ib", storageTB: 0, storageCostPerTB: 0 });
           const fin = financingComparison({ bom, gpuKey, region });
-          expect(fin.colo.total3yr).toBeLessThan(fin.onPrem.total3yr);
+          const kwh = region === "in" ? KWH_INR : KWH_USD;
+          const annualPowerUsd = region === "in" ? (bom.totalKw * 8760 * kwh) / USD_INR : bom.totalKw * 8760 * kwh;
+          const expectedGap = (bom.totalKw * COLO_PER_KW_MONTH * 12 - annualPowerUsd) * TCO_YEARS;
+          expect(fin.colo.total3yr - fin.onPrem.total3yr).toBeCloseTo(expectedGap, 4);
         }
       }
     });
 
-    it("cheapestKey only ever resolves to colo or gaas across a representative input sweep", () => {
-      // "gaas" surfaces once capex is driven high enough (e.g. by storage) that colo/onPrem
+    it("cheapestKey is not structurally locked to colo/gaas — 'onPrem' can win now that real power cost beats colo's flat rate", () => {
+      const bom = buildBom({ gpuKey: "h100", gpuCount: 128, fabricKey: "ib", storageTB: 0, storageCostPerTB: 0 });
+      const fin = financingComparison({ bom, gpuKey: "h100", region: "us" });
+      expect(fin.onPrem.total3yr).toBeLessThan(fin.colo.total3yr);
+      expect(fin.cheapestKey).toBe("onPrem");
+    });
+
+    it("cheapestKey across a representative input sweep resolves to onPrem or gaas (never cloud, and no longer colo-by-construction)", () => {
+      // "gaas" surfaces once capex is driven high enough (e.g. by storage) that onPrem/colo
       // both inherit that capex while cloud/gaas — priced purely off GPU count — don't.
       const gpuKeys = Object.keys(CLOUD_HR);
       const storageOptions = [
@@ -201,7 +211,7 @@ describe("financingComparison", () => {
           }
         }
       }
-      expect(seen).toEqual(new Set(["colo", "gaas"]));
+      expect(seen).toEqual(new Set(["onPrem", "gaas"]));
     });
   });
 });

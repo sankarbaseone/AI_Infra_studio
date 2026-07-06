@@ -9,15 +9,21 @@ new session without losing context. Update it at the end of each working session
 **Owner:** Sankar — AI Infrastructure Advisory & Technical Delivery, Deloitte (COE)
 **Classification:** Internal — Deloitte AI Infrastructure COE asset
 **Status:** v2.0 built, verified working, and launched locally; `docs/` documentation set and
-`CLAUDE.md` added; calc/tco/format test suite built out (52 tests passing) — surfaced a real
-financing-model discrepancy along the way, see `PRODUCT_BACKLOG.md` item 3; git repo live in
-`~/workspace/nydux` (native Linux mirror — see environment note below), 5 commits made,
+`CLAUDE.md` added; calc/tco/format test suite built out (53 tests passing). Git repo live in
+`~/workspace/nydux` (native Linux mirror — see environment note below), 6 commits made,
 **pushed to `https://github.com/sankarbaseone/AI_Infra_studio` and confirmed in sync**
-(`b26fece`, latest, pushed 2026-07-06).
+(latest local commit `dded80a`, plus this session's colo-TCO fix — awaiting commit/push).
 **"Your Configuration" live BOM column implemented and shipped** (resolves Backlog #2 / D10)
 — see below for the scope amendment made during planning (fabric/storage became real
 InferenceTab inputs; control-node sizing became a node-count formula applied to all 4
 columns).
+**Colocation TCO formula fixed** (resolves Backlog #3's financing-model discrepancy):
+`colo3` was missing `bom.annualSupport`, which `onPremTco3` always carried, making `colo`
+mathematically guaranteed to beat `onPrem` in every scenario. Fixed 2026-07-06 — `colo3` now
+carries `annualSupport` symmetrically. Post-fix, `cheapestKey` resolves to `onPrem` or `gaas`
+under current constants; a new residual (colo doesn't win under any current-constant
+scenario either) is noted as a separate, unfixed observation — see `PRODUCT_BACKLOG.md`
+item 3.
 
 **⚠️ Environment note (discovered 2026-07-05, extended 2026-07-06):** this repo lives on a
 Windows-mounted DrvFS path (`/mnt/c/...` from WSL). DrvFS mounts here do not support `chmod`
@@ -164,7 +170,7 @@ for status.
 - **Git repo is live** in `~/workspace/nydux`, 4 local commits, pushed and confirmed in sync
   with `github.com/sankarbaseone/AI_Infra_studio` (no longer a gap).
 - **Automated tests**: `src/lib/calc.test.js`, `src/lib/tco.test.js`, `src/lib/format.test.js`
-  — 52 tests total, all passing via Vitest (`npm test`). No longer a gap for the calc/tco
+  — 53 tests total, all passing via Vitest (`npm test`). No longer a gap for the calc/tco
   engine; still no tests for UI components/tabs (no React component-test harness exists yet).
 - **No TypeScript** — confirmed, no `tsconfig.json`, `.jsx` throughout. `shared` now has a
   documented (JSDoc, not runtime-enforced) shape via `src/lib/sharedSchema.js`.
@@ -176,12 +182,14 @@ for status.
 - **PDF export duplicates on-screen table logic** — two representations of the same matrix
   (partially unified for the 4th column via a shared `columns`/`results` shape, but still two
   separate render implementations overall)
-- **NEW: financing-model discrepancy** (found while writing the Backlog #3 test suite) —
-  `cheapestKey` never resolves to `onPrem`/`cloud` under current constants. Not fixed;
-  flagged for a decision. See `PRODUCT_BACKLOG.md` item 3.
+- ~~financing-model discrepancy (`colo` always beat `onPrem`)~~ — **Fixed 2026-07-06.**
+  `colo3` was missing `bom.annualSupport`; now symmetric with `onPremTco3`. Post-fix,
+  `cheapestKey` resolves to `onPrem` or `gaas`. **New residual noted, not a bug in this
+  fix's scope:** `colo` doesn't win under any current-constant scenario either —
+  `COLO_PER_KW_MONTH` may be worth recalibrating separately. See `PRODUCT_BACKLOG.md` item 3.
 - **NEW: no live in-browser verification for the "Your Configuration" feature** — headless
   Chromium couldn't be installed in this sandboxed WSL environment (missing system shared
-  libraries, `sudo` unavailable non-interactively). Verified instead via: `npm test` (52/52),
+  libraries, `sudo` unavailable non-interactively). Verified instead via: `npm test` (53/53),
   `npm run build` (clean), and a Node script exercising the real computation path with
   realistic default inputs for both the 3 fixed tiers and the live column (zero NaN/Infinity,
   confirmed live `aggregateTokPerSec` matches `shared` exactly). **Recommend a manual
@@ -287,11 +295,12 @@ Toolchain: Node + npm · Vite v5.4.21 · React 18. Local commands (no model quot
    Inference tab, configure GPU/fabric/storage → return to BOM tab → 4th column populates →
    toggle vendor NVIDIA↔AMD → confirm 3 tiers' GPUs change, live column's doesn't (by design)
    but its cost numbers still update → export PDF in both populated/unpopulated states.
-1. **Decide on the financing-model discrepancy** (surfaced 2026-07-06, not fixed —
-   see `PRODUCT_BACKLOG.md` item 3): `cheapestKey` never resolves to `onPrem` or `cloud`
-   under current constants — `colo` structurally beats `onPrem` for every GPU/region
-   combination, and `gaas` always undercuts `cloud`. Is `SUPPORT_PCT`/`COLO_PER_KW_MONTH`
-   miscalibrated, or is this an accurate (if counter-intuitive) reflection of real pricing?
+1. **Decide whether `COLO_PER_KW_MONTH` needs recalibrating** (residual from the 2026-07-06
+   colo-TCO fix — see `PRODUCT_BACKLOG.md` item 3): the missing-`annualSupport` bug is fixed,
+   but under current constants `colo` still never wins `cheapestKey` (`onPrem`'s real power
+   cost now consistently undercuts colo's flat $150/kW/month rate in both regions). Is
+   $150/kW/month realistic, or does it need tuning so on-prem-vs-colocation is a live
+   decision in some scenarios?
 2. Confirm Deloitte-laptop Node/npm registry access — still outstanding.
 3. Decide whether to build the dedicated "vital DC input" discovery panel, or keep inputs
    inline on the BOM tab (§4, item 1).

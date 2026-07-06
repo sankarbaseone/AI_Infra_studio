@@ -40,12 +40,16 @@ export function financingComparison({ bom, gpuKey, region = "in" }) {
   const annualPower = bom.totalKw * 8760 * kwh;
   const annualPowerUsd = region === "in" ? annualPower / USD_INR : annualPower;
 
+  // On-Prem and Colo both carry annualSupport (hardware support/maintenance contract) —
+  // colocation replaces the facility (power/space/cooling), not the OEM support obligation.
+  // GaaS is intentionally NOT independently modeled against Cloud — gaas3 = cloud3 * GAAS_DISCOUNT
+  // is a reserved-vs-on-demand pricing relationship, not a separate cost estimate.
   const onPremTco3 = bom.capex + (annualPowerUsd + bom.annualSupport) * TCO_YEARS;
 
   const cloudHr = CLOUD_HR[gpuKey];
   const cloud3 = bom.provisioned * cloudHr * 8760 * TCO_YEARS;
   const gaas3 = cloud3 * GAAS_DISCOUNT;
-  const colo3 = bom.capex + bom.totalKw * COLO_PER_KW_MONTH * 36; // hardware owned + hosting fee bundle
+  const colo3 = bom.capex + (bom.totalKw * COLO_PER_KW_MONTH * 12 + bom.annualSupport) * TCO_YEARS; // hardware owned + hosting fee bundle
 
   const breakEvenMonths = cloudHr > 0 ? bom.capex / (bom.provisioned * cloudHr * 730) : 0;
 

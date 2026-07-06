@@ -26,9 +26,17 @@ updated at the end of every working session per Roadmap §9.4.
   characterizes existing behavior, including the validated ~154-day training anchor, the
   GQA-awareness regression, and pins on the 0.85-usable-HBM / ×18-batching constants.
   `npm run build` reconfirmed clean afterward.
-- **Discrepancy found and documented (not fixed):** `financingComparison`'s `cheapestKey`
-  never resolves to `onPrem` or `cloud` under current constants — see `PRODUCT_BACKLOG.md`
-  item 3 for the full finding and `src/lib/tco.test.js` for the pinned proof.
+- **Discrepancy found (2026-07-06), then fixed the same day:** `financingComparison`'s
+  `cheapestKey` never resolved to `onPrem` or `cloud` under current constants —
+  `cloud` losing to `gaas` is by design (reserved-vs-on-demand discount), but `colo3` was
+  found to be missing `bom.annualSupport`, which `onPremTco3` always carried — a genuine
+  missing cost line, not a facility-cost difference. Fixed in `src/lib/tco.js`: `colo3` now
+  includes `bom.annualSupport` over `TCO_YEARS`, symmetric with `onPremTco3`. Post-fix,
+  `cheapestKey` resolves to `onPrem` or `gaas` under current constants — see
+  `PRODUCT_BACKLOG.md` item 3 for the full before/after finding and `src/lib/tco.test.js`'s
+  "cheapest-flagging — post-fix behavior" block for the pinned proof, including a new
+  regression test proving `cheapestKey` is no longer structurally locked to `colo`/`gaas`.
+  1 new test (53 total, all passing). `npm run build` clean (42 modules, unchanged).
 - **"Your Configuration" live BOM column** (resolves Backlog #2 / `DECISIONS.md` D10):
   `TieredBomTab.jsx` now renders a 4th column wired live to `shared`, alongside the
   unchanged Foundation/Standard/Enterprise tiers. New `src/lib/sharedSchema.js`

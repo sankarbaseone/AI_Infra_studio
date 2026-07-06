@@ -191,10 +191,15 @@ See [PRODUCT_BACKLOG.md](./PRODUCT_BACKLOG.md) for the full, prioritized list. S
 8. **PDF export duplicates rendering logic** with the on-screen table — a drift risk on any
    future layer change. Partially mitigated for the 4th-column addition (both now iterate
    the same `columns`/`results` shape), but still two separate render implementations.
-9. **A genuine financing-model discrepancy was found while writing the calc/tco test
-   suite:** `financingComparison`'s `cheapestKey` never resolves to `onPrem` or `cloud`
-   under current constants — see [PRODUCT_BACKLOG.md — item 3](./PRODUCT_BACKLOG.md#3-add-automated-test-suite-for-the-calculation-engine)
-   for the full finding. Not fixed; flagged for Sankar's decision.
+9. ~~A genuine financing-model discrepancy was found while writing the calc/tco test
+   suite: `financingComparison`'s `cheapestKey` never resolves to `onPrem` or `cloud` under
+   current constants.~~ **Colo half fixed 2026-07-06** — `colo3` was missing
+   `bom.annualSupport`, which `onPremTco3` always carried; now symmetric. Post-fix,
+   `cheapestKey` resolves to `onPrem` or `gaas` under current constants (`cloud` still never
+   wins, by design — `gaas` is a deliberate reserved-vs-on-demand discount off `cloud`, not a
+   bug). New residual noted: `colo` itself doesn't win under current constants either —
+   `COLO_PER_KW_MONTH`'s flat rate may be worth recalibrating, separate from this fix. See
+   [PRODUCT_BACKLOG.md — item 3](./PRODUCT_BACKLOG.md#3-add-automated-test-suite-for-the-calculation-engine).
 
 No code was modified in producing this document — it is a description of the codebase as it
 stands.
