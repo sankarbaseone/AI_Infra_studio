@@ -106,6 +106,19 @@ Every feature must
 
 ---
 
+# Recently Completed
+
+- "Your Configuration" live BOM column (PRODUCT_BACKLOG.md #2 / DECISIONS.md D10) —
+  shipped 2026-07-06
+- Colocation TCO formula fix — missing `annualSupport` cost (PRODUCT_BACKLOG.md #3) —
+  shipped 2026-07-06
+
+Do not re-flag these as open. See `docs/PROJECT_STATE.md` and `docs/CHANGELOG.md` for
+detail, including residuals noted as separate open items (e.g. `COLO_PER_KW_MONTH`
+recalibration).
+
+---
+
 # Current Priorities
 
 Priority 1
