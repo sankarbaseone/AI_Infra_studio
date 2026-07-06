@@ -20,10 +20,15 @@ updated at the end of every working session per Roadmap §9.4.
   blocks `chmod`, which git's lockfile mechanism needs for every write). First commit
   `fd03284`. Remote added: `https://github.com/sankarbaseone/AI_Infra_studio`. Push pending
   Sankar's GitHub credentials. See `DECISIONS.md` D9 for the full record.
-- Test suite added for the sizing engine: `src/lib/calc.test.js` (16 tests) and
-  `src/lib/tco.test.js` (12 tests), 28 tests total, via Vitest (`npm test`). Zero production
-  code changes — characterizes existing behavior, including the validated ~154-day training
-  anchor. `npm run build` reconfirmed clean afterward.
+- Test suite added for the sizing engine, then extended per a follow-up "Calculation Engine
+  Test Suite" spec: `src/lib/calc.test.js`, `src/lib/tco.test.js`, `src/lib/format.test.js`,
+  47 tests total, via Vitest (`npm test`/`npm test:watch`). Zero production code changes —
+  characterizes existing behavior, including the validated ~154-day training anchor, the
+  GQA-awareness regression, and pins on the 0.85-usable-HBM / ×18-batching constants.
+  `npm run build` reconfirmed clean afterward.
+- **Discrepancy found and documented (not fixed):** `financingComparison`'s `cheapestKey`
+  never resolves to `onPrem` or `cloud` under current constants — see `PRODUCT_BACKLOG.md`
+  item 3 for the full finding and `src/lib/tco.test.js` for the pinned proof.
 
 ## [2.0.0] — v2.0 build (packaged 2026-07-05)
 

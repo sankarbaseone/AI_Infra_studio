@@ -9,7 +9,9 @@ new session without losing context. Update it at the end of each working session
 **Owner:** Sankar — AI Infrastructure Advisory & Technical Delivery, Deloitte (COE)
 **Classification:** Internal — Deloitte AI Infrastructure COE asset
 **Status:** v2.0 built, verified working, and launched locally; `docs/` documentation set
-and `CLAUDE.md` added; calc/tco test suite added (28 tests passing); **git repo is now live**
+and `CLAUDE.md` added; calc/tco/format test suite added and extended per a follow-up spec
+(47 tests passing) — surfaced a real financing-model discrepancy along the way, see below;
+**git repo is now live**
 — but in `~/workspace/nydux` (native Linux mirror), not the Windows-mounted path, since WSL
 cannot write git objects to `/mnt/c/...` at all (see environment note below). First commit
 `fd03284`, remote `https://github.com/sankarbaseone/AI_Infra_studio` added — **push still
@@ -259,6 +261,13 @@ Toolchain: Node + npm · Vite v5.4.21 · React 18. Local commands (no model quot
 
 ## 8. Immediate next actions (pick up here)
 
+0. **Decide on the financing-model discrepancy** (surfaced 2026-07-06, not fixed —
+   see `PRODUCT_BACKLOG.md` item 3): `cheapestKey` never resolves to `onPrem` or `cloud`
+   under current constants — `colo` structurally beats `onPrem` for every GPU/region
+   combination, and `gaas` always undercuts `cloud`. Is `SUPPORT_PCT`/`COLO_PER_KW_MONTH`
+   miscalibrated, or is this an accurate (if counter-intuitive) reflection of real pricing?
+   This affects what the BOM tab's financing comparison actually demonstrates in a client
+   demo.
 1. **Confirm git landed.** Run `git log --oneline` (or check GitHub) to confirm the first
    commit + push completed. If not done yet, re-run the commands provided at the end of the
    2026-07-06 session (git init → commit 1 → remote add → push; then a second commit for the

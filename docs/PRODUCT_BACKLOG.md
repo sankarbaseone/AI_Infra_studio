@@ -52,11 +52,27 @@ Sorted in recommended implementation order. Cross-references
 ---
 
 ### 3. Add automated test suite for the calculation engine
-- **Status:** Done (2026-07-06) — `src/lib/calc.test.js` (16 tests) and `src/lib/tco.test.js`
-  (12 tests), 28 tests total, all passing, via Vitest. Includes the validated ~154-day
-  training-time anchor regression from `PROJECT_STATE.md`. Zero changes to `calc.js`/`tco.js`
-  themselves — this was pure test-writing against existing behavior. `npm run build` reconfirmed
-  clean (41 modules, same output size) after the change.
+- **Status:** Done (2026-07-06, extended per a follow-up spec the same day) —
+  `src/lib/calc.test.js`, `src/lib/tco.test.js`, `src/lib/format.test.js`, 47 tests total,
+  all passing, via Vitest. Includes the validated ~154-day training-time anchor regression,
+  the GQA-awareness regression (kvHeads vs heads), explicit pins on the 0.85-usable-HBM and
+  ×18-continuous-batching constants, and exact-arithmetic tests for all 4 financing models.
+  Zero changes to `calc.js`/`tco.js` themselves — this was pure test-writing against existing
+  behavior. `npm run build` reconfirmed clean (41 modules, same output size) after the change.
+- **⚠️ Discrepancy surfaced, not fixed (per spec instruction — flagging for Sankar's call):**
+  an empirical sweep across all 6 GPUs × 2 regions × 3 GPU counts × storage configs shows
+  `financingComparison`'s `cheapestKey` **only ever resolves to `colo` or `gaas`** — `onPrem`
+  and `cloud` never win, for any current input combination. Two distinct causes, both pinned
+  as tests: (1) `cloud` can never win because `gaas = 0.75 × cloud` always undercuts it —
+  this is inherent to the formula, not really a bug. (2) `colo` beats `onPrem` for every
+  current GPU/node profile in both regions, because `SUPPORT_PCT` (10%/yr of hardware cost)
+  plus power cost consistently exceeds `COLO_PER_KW_MONTH`'s flat hosting-fee equivalent at
+  today's price/power ratios — and since capex cancels out of that specific comparison, this
+  holds regardless of GPU count or storage. **This means the on-prem-vs-colocation choice
+  isn't really a live decision in the tool today — colo always wins on paper.** Worth a
+  deliberate look at whether `SUPPORT_PCT`/`COLO_PER_KW_MONTH` are calibrated as intended, or
+  whether this is a genuine (if counter-intuitive) reflection of current market pricing. See
+  `src/lib/tco.test.js`'s "cheapest-flagging" describe block for the pinned proof.
 - **Priority:** Critical
 - **Business value:** `lib/calc.js` and `lib/tco.js` are pure functions with zero test
   coverage, yet they are the actual IP the tool sells on. Correctness currently rests

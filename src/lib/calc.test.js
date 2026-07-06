@@ -80,6 +80,16 @@ describe("tokPerSecPerGpu", () => {
     const fp8 = tokPerSecPerGpu(paramsB, "h100", "fp8");
     expect(fp8).toBeCloseTo(fp16 * 2, 2);
   });
+
+  it("pins the x18 continuous-batching fudge factor specifically", () => {
+    // Isolate the multiplier itself: throughput should be exactly 18x the raw
+    // bandwidth-per-byte "base" rate, no more, no less — guards against the constant
+    // silently drifting during a future magic-number-extraction refactor.
+    const g = GPUS.h100, paramsB = 70, prec = "fp8";
+    const base = (g.bw * 1e12) / (2 * paramsB * 1e9 * bytesFor(prec));
+    const actual = tokPerSecPerGpu(paramsB, "h100", prec);
+    expect(actual / base).toBeCloseTo(18, 6);
+  });
 });
 
 describe("sizeInference", () => {
@@ -111,6 +121,32 @@ describe("sizeInference", () => {
     });
     expect(result.gpusNeeded).toBeGreaterThanOrEqual(1);
   });
+
+  it("pins the 85%-usable-HBM assumption in the memory-bound GPU count", () => {
+    // Construct a case dominated by memory (huge ctx, negligible throughput ask) and verify
+    // gpusForMem is computed against 85% of usable HBM, not the full nameplate HBM.
+    const result = sizeInference({
+      model: llama70b, gpuKey: "h100", prec: "fp16",
+      peakOutTokPerSec: 1, ctx: 128000,
+    });
+    const expectedGpusForMem = Math.ceil(result.memNeeded / (GPUS.h100.hbm * 0.85));
+    expect(result.gpusForMem).toBe(expectedGpusForMem);
+    // Sanity: using the full (non-85%) HBM figure would give a different, smaller answer —
+    // this guards against someone "fixing" the 0.85 factor away as a typo later.
+    const usingFullHbm = Math.ceil(result.memNeeded / GPUS.h100.hbm);
+    expect(expectedGpusForMem).toBeGreaterThanOrEqual(usingFullHbm);
+  });
+
+  it("ties go to memory-bound when gpusForMem equals gpusForTput (>= tie-break in the code)", () => {
+    // sizeInference's bound is `gpusForMem >= gpusForTput ? "memory-bound" : "throughput-bound"`.
+    // Reverse-engineer a peakOutTokPerSec that makes gpusForTput land exactly on gpusForMem.
+    const probe = sizeInference({ model: llama70b, gpuKey: "h100", prec: "fp8", peakOutTokPerSec: 1, ctx: 8192 });
+    const targetGpus = probe.gpusForMem; // memory-bound count for this ctx/precision
+    const peakOutTokPerSec = targetGpus * probe.perGpuTps; // exactly enough demand for targetGpus via throughput
+    const result = sizeInference({ model: llama70b, gpuKey: "h100", prec: "fp8", peakOutTokPerSec, ctx: 8192 });
+    expect(result.gpusForMem).toBe(result.gpusForTput);
+    expect(result.bound).toBe("memory-bound"); // pins the >= tie-break direction
+  });
 });
 
 describe("training time anchor regression (70B params / 2T tokens / 128xH100 / 50% MFU / IB fabric)", () => {
@@ -124,5 +160,29 @@ describe("training time anchor regression (70B params / 2T tokens / 128xH100 / 5
     const days = flops / eff / 86400;
     expect(days).toBeGreaterThan(150);
     expect(days).toBeLessThan(158);
+  });
+});
+
+describe("fabric-specific MFU bonus/penalty shifts effective MFU and training time", () => {
+  // effMfu = Math.max(0.1, mfu + FABRICS[fabric].mfuBonus) — this combination itself lives
+  // in TrainingTab.jsx (UI layer, out of scope per this suite's §1), but FABRICS[key].mfuBonus
+  // is calc-engine reference data and this pins that the *data* correctly produces a training
+  // time delta when applied, across more than one fabric option.
+  const paramsB = 70, tokensT = 2, gpuKey = "h100", count = 128, prec = "bf16", mfu = 0.5;
+  const daysFor = (fabricKey) => {
+    const effMfu = Math.max(0.1, mfu + FABRICS[fabricKey].mfuBonus);
+    const eff = clusterPeak(gpuKey, count, prec) * effMfu;
+    return trainingFlops(paramsB, tokensT) / eff / 86400;
+  };
+
+  it("InfiniBand (0.0 bonus) trains faster than RoCE v2/400G (-0.10 penalty)", () => {
+    expect(FABRICS.ib.mfuBonus).toBe(0.0);
+    expect(FABRICS.roce.mfuBonus).toBeLessThan(0);
+    expect(daysFor("ib")).toBeLessThan(daysFor("roce"));
+  });
+
+  it("RoCE v2/800G (-0.05) sits between IB and RoCE/400G (-0.10), narrowing the gap to IB", () => {
+    expect(daysFor("ib")).toBeLessThan(daysFor("roce800"));
+    expect(daysFor("roce800")).toBeLessThan(daysFor("roce"));
   });
 });

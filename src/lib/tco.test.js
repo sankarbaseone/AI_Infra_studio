@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { buildBom, financingComparison, unitEconomics } from "./tco.js";
 import {
   NODES, FABRICS, PUE_DEFAULT, USD_INR, KWH_INR, TCO_YEARS, GAAS_DISCOUNT,
+  CLOUD_HR, COLO_PER_KW_MONTH,
 } from "../data/reference.js";
 
 describe("buildBom", () => {
@@ -55,10 +56,31 @@ describe("financingComparison", () => {
     expect(fin.colo.total3yr).toBeGreaterThan(0);
   });
 
-  it("prices GPU-as-a-Service at the reserved discount off the public cloud rate", () => {
+  it("On-Premises: exact formula = capex + (annualPowerUsd + annualSupport) * 3", () => {
+    const bom = buildBom({ gpuKey: "h100", gpuCount: 128, fabricKey: "ib", storageTB: 100, storageCostPerTB: 700 });
+    const fin = financingComparison({ bom, gpuKey: "h100", region: "us" });
+    const expected = bom.capex + (fin.annualPowerUsd + bom.annualSupport) * TCO_YEARS;
+    expect(fin.onPrem.total3yr).toBeCloseTo(expected, 4);
+  });
+
+  it("Public Cloud: exact formula = provisioned GPUs * $/GPU-hr * 8760 * 3", () => {
+    const bom = buildBom({ gpuKey: "h100", gpuCount: 128, fabricKey: "ib", storageTB: 100, storageCostPerTB: 700 });
+    const fin = financingComparison({ bom, gpuKey: "h100", region: "us" });
+    const expected = bom.provisioned * CLOUD_HR.h100 * 8760 * TCO_YEARS;
+    expect(fin.cloud.total3yr).toBeCloseTo(expected, 4);
+  });
+
+  it("GPU-as-a-Service: exact formula = 0.75 x Public Cloud total (reserved discount)", () => {
     const bom = buildBom({ gpuKey: "h100", gpuCount: 128, fabricKey: "ib", storageTB: 100, storageCostPerTB: 700 });
     const fin = financingComparison({ bom, gpuKey: "h100", region: "us" });
     expect(fin.gaas.total3yr).toBeCloseTo(fin.cloud.total3yr * GAAS_DISCOUNT, 2);
+  });
+
+  it("Colocation: exact formula = capex + totalKw * $150/kW/month * 36 months", () => {
+    const bom = buildBom({ gpuKey: "h100", gpuCount: 128, fabricKey: "ib", storageTB: 100, storageCostPerTB: 700 });
+    const fin = financingComparison({ bom, gpuKey: "h100", region: "us" });
+    const expected = bom.capex + bom.totalKw * COLO_PER_KW_MONTH * 36;
+    expect(fin.colo.total3yr).toBeCloseTo(expected, 4);
   });
 
   it("picks the actual minimum as cheapestKey, not just the first option in the list", () => {
@@ -74,6 +96,83 @@ describe("financingComparison", () => {
     const finIn = financingComparison({ bom, gpuKey: "h100", region: "in" });
     const expectedAnnualPowerUsd = (bom.totalKw * 8760 * KWH_INR) / USD_INR;
     expect(finIn.annualPowerUsd).toBeCloseTo(expectedAnnualPowerUsd, 4);
+  });
+
+  it("annualPowerUsd is denominated in USD for the India region too — no INR conversion leaks out of tco.js", () => {
+    // ARCHITECTURE.md: "raw math in USD, with an INR conversion applied only at display
+    // time." Assert tco.js's own output is already USD-normalized (via the /USD_INR divide
+    // in the region==="in" branch), not left in raw INR — that would be a currency-unit bug,
+    // and the *83.5 redisplay-as-INR conversion belongs to the UI layer, not here. Locks in
+    // the current separation of concerns before Backlog #6 (configurable currency) touches
+    // this.
+    const bom = buildBom({ gpuKey: "h100", gpuCount: 8, fabricKey: "ib", storageTB: 0, storageCostPerTB: 0 });
+    const finIn = financingComparison({ bom, gpuKey: "h100", region: "in" });
+    const effectiveUsdPerKwh = finIn.annualPowerUsd / (bom.totalKw * 8760);
+    // (KWH_INR / USD_INR) ≈ 0.0958 $/kWh — a plausible USD electricity rate. If tco.js
+    // accidentally left this in raw INR (forgot the /USD_INR divide), this would instead be
+    // ≈ 8 (KWH_INR itself), off by ~83.5x.
+    expect(effectiveUsdPerKwh).toBeCloseTo(KWH_INR / USD_INR, 6);
+  });
+
+  describe("cheapest-flagging — documented current behavior (2026-07-06 discrepancy note)", () => {
+    // FINDING (empirically verified via a sweep across all 6 GPUs x 2 regions x 3 GPU
+    // counts x 3 storage configs — see PR description): under the CURRENT constants,
+    // "onPrem" and "cloud" NEVER win cheapestKey. Only "colo" and "gaas" are ever flagged
+    // cheapest. This is a structural property of the formulas, not a fluke of any one input:
+    //
+    //  - "cloud" can mathematically never be cheapest, because gaas = 0.75 x cloud is
+    //    always strictly less than cloud whenever both are computed from the same bom —
+    //    gaas will always undercut it.
+    //  - "onPrem" loses to "colo" for every current GPU/node profile in NODES, in both
+    //    regions, because SUPPORT_PCT (10%/yr of hardware cost) plus power cost consistently
+    //    exceeds COLO_PER_KW_MONTH's flat hosting-fee equivalent for these price/power
+    //    ratios. Since capex is identical in both formulas, this comparison is actually
+    //    independent of GPU count and storage — it depends only on gpuKey and region.
+    //
+    // Per the spec's instruction: this is not fixed here. It's pinned as current behavior
+    // and flagged for Sankar to decide whether the SUPPORT_PCT/COLO_PER_KW_MONTH constants
+    // need recalibration, or whether this is working as intended.
+
+    it("GPU-as-a-Service always undercuts Public Cloud — 'cloud' can never be cheapestKey", () => {
+      const bom = buildBom({ gpuKey: "b200", gpuCount: 64, fabricKey: "roce800", storageTB: 50, storageCostPerTB: 1600 });
+      const fin = financingComparison({ bom, gpuKey: "b200", region: "us" });
+      expect(fin.gaas.total3yr).toBeLessThan(fin.cloud.total3yr);
+      expect(fin.cheapestKey).not.toBe("cloud");
+    });
+
+    it("Colocation beats On-Premises for every current GPU/node profile, in both regions", () => {
+      const gpuKeys = Object.keys(CLOUD_HR); // all 6 GPU keys with a defined cloud rate
+      for (const gpuKey of gpuKeys) {
+        for (const region of ["us", "in"]) {
+          const bom = buildBom({ gpuKey, gpuCount: 128, fabricKey: "ib", storageTB: 0, storageCostPerTB: 0 });
+          const fin = financingComparison({ bom, gpuKey, region });
+          expect(fin.colo.total3yr).toBeLessThan(fin.onPrem.total3yr);
+        }
+      }
+    });
+
+    it("cheapestKey only ever resolves to colo or gaas across a representative input sweep", () => {
+      // "gaas" surfaces once capex is driven high enough (e.g. by storage) that colo/onPrem
+      // both inherit that capex while cloud/gaas — priced purely off GPU count — don't.
+      const gpuKeys = Object.keys(CLOUD_HR);
+      const storageOptions = [
+        { tb: 100, cost: 700 },
+        { tb: 1_000_000, cost: 1800 }, // drives capex high enough for gaas to win
+      ];
+      const seen = new Set();
+      for (const gpuKey of gpuKeys) {
+        for (const region of ["us", "in"]) {
+          for (const gpuCount of [8, 128, 1024]) {
+            for (const s of storageOptions) {
+              const bom = buildBom({ gpuKey, gpuCount, fabricKey: "ib", storageTB: s.tb, storageCostPerTB: s.cost });
+              const fin = financingComparison({ bom, gpuKey, region });
+              seen.add(fin.cheapestKey);
+            }
+          }
+        }
+      }
+      expect(seen).toEqual(new Set(["colo", "gaas"]));
+    });
   });
 });
 
