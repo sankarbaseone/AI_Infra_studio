@@ -1,192 +1,126 @@
 # CLAUDE.md
 
-# Deloitte AI Infra Studio
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Mission
+## What this is
 
-This application is an internal Deloitte AI Infrastructure COE engineering tool.
+Deloitte AI Infra Studio — an internal Deloitte AI Infrastructure COE tool (not a
+commercial product) that sizes on-prem AI infrastructure for LLM training and inference,
+producing a tiered Bill of Materials (BOM), Total Cost of Ownership (TCO), and financing
+comparison. Browser-only Vite + React 18 SPA: no backend, no database, no network calls —
+"client data never leaves the browser" is part of the trust pitch, not an implementation
+detail.
 
-It helps architects size AI infrastructure for:
+## Commands
 
-- LLM Training
-- LLM Inference
-- AI Factory
-- AI Data Centers
+```bash
+npm install
+npm run dev          # dev server → http://localhost:5173
+npm run build        # production build → dist/
+npm run preview      # serve production build → http://localhost:4173 — ALWAYS use this for demos, not dev
+npm test             # full Vitest suite (vitest run)
+npm test -- src/lib/tco.test.js   # single test file
+npm run test:watch   # watch mode
+```
 
-It produces:
+Node version is pinned in `.nvmrc` (Node 20).
 
-- Infrastructure sizing
-- Bill of Materials (BOM)
-- Total Cost of Ownership (TCO)
-- Deployment recommendations
+## Repo locations — read before running npm or git
 
-This is NOT a commercial software product.
+Two copies of this project exist (see `docs/DECISIONS.md` D9):
 
----
+- **`~/workspace/nydux`** — the canonical **git-tracked** repo (remote:
+  `github.com/sankarbaseone/AI_Infra_studio`). All git operations, `npm install`, builds,
+  and tests run here.
+- **`/mnt/c/Personal/.../Deloitte_AI_Infra_Studio_v2/infra-studio-v2`** — Windows-mounted
+  (DrvFS) working copy for Windows-side editors. **`npm install` and all git writes fail
+  there** (DrvFS without `metadata` rejects every `chmod`; npm and git's lockfiles both
+  need it). Sync plain files back with `cp --no-preserve=mode,ownership,timestamps`
+  (ignore its "setting permissions" error); never copy `node_modules` that way.
 
-# Technology Stack
+Pushing needs Sankar's GitHub PAT, which is not in this environment — he runs `git push`
+himself from a WSL terminal.
 
-Frontend
+## Architecture
 
-- React 18
-- Vite
-- JavaScript
+Strict one-way layering — **data → lib → components → tabs → App**:
 
-Architecture
+- `src/data/reference.js` — ALL constants (GPU specs, node configs, fabrics, storage,
+  tiers, cloud rates, tariffs). Zero logic. Every category has a `DATA_META` entry with
+  `lastReviewed` + `source`; any new reference-data category must include one (D8,
+  non-optional).
+- `src/lib/` — pure, framework-free calculation engine, no React imports. `calc.js`
+  (FLOPs, memory, KV-cache, `sizeInference` — memory-bound vs throughput-bound, max
+  wins), `tco.js` (`buildBom`, 4-way `financingComparison`, `unitEconomics`,
+  `controlNodeSpec`), `format.js`, `sharedSchema.js` (JSDoc typedef + readiness check for
+  cross-tab state). This layer is fully covered by Vitest; UI is not.
+- `src/components/ui.jsx` — shared presentational primitives (Field, Stat, Chip, Sel, NumIn).
+- `src/tabs/` — the only layer holding state and wiring calc → UI. New features (Digital
+  Twin, Financial Cockpit) go in as new tab files consuming `lib`/`data` — never grow
+  calculation logic inside a tab (D6).
+- `src/exportBomPdf.js` — dependency-free PDF export (hand-built HTML string +
+  `window.print()`). It is a second render implementation of the BOM matrix and can drift
+  from the on-screen table — check it whenever the matrix changes.
 
-- Browser-only SPA
-- No backend
-- No database
+**Cross-tab data flow ("carry-forward" pattern):** `App.jsx` owns `shared`, written via
+`useEffect` in tabs and read by later tabs. State flows forward only: TokenTab →
+`shared.effTokensT` → TrainingTab (seeds on mount, not reactive); InferenceTab →
+`shared.{inferGpu, inferGpus, aggregateTokPerSec, inferFabricKey, inferStorageTB, ...}`
+(shape documented in `src/lib/sharedSchema.js`) → TieredBomTab's "Your Configuration"
+column. Tabs are conditionally mounted, so local tab state resets on tab switch — only
+`shared` persists.
 
-Project Structure
+**TieredBomTab (the flagship):** one shared engine call, `computeTierFromInput()`
+(`buildBom` → `financingComparison` → `unitEconomics`), feeds all 4 columns; only the
+input adapter differs — `tierToSizingInput()` for the 3 fixed tiers (re-runs
+`sizeInference` with tier `usersMid`), `liveToSizingInput()` for the live column (takes
+InferenceTab's already-computed sizing from `shared`, deliberately does NOT re-run
+`sizeInference` so the two paths can't drift). The live column is gated by
+`isLiveConfigReady(shared)` and shows a placeholder until InferenceTab is configured.
 
-- src/data
-- src/lib
-- src/components
-- src/tabs
+## Fixed constraints (docs/DECISIONS.md — read before "fixing" anything)
 
----
+- **D1 — Vendor neutrality is non-negotiable.** NVIDIA and AMD get equal analytical
+  weight; the vendor toggle recomputes the entire matrix. Decline or redesign any change
+  that breaks parity. (Known, deliberate exception per D10: the live column's GPU stays
+  pinned to the InferenceTab pick on vendor toggle; its numbers still recompute.)
+- **D2 — No backend.** Persistence features (e.g. scenario save/compare) default to
+  browser-local storage.
+- **D3 — Fixed tiers** (Foundation/Standard/Enterprise user bands) match an internal
+  Deloitte template; don't make them flexible.
+- **D4 — Workload-type multipliers are qualitative only** until a COE owner supplies
+  calibrated delivery data. Don't build the numeric version speculatively.
+- **D5 — No dependencies beyond React** (`react`, `react-dom`; Vite/Vitest as dev deps).
+  Adding any library is a deliberate decision, not an incidental `npm install`.
 
-# Engineering Principles
+## Development workflow
 
-Always
+Before writing code: read `docs/PROJECT_STATE.md` (session-by-session source of truth,
+including current priorities and known gaps) and `docs/PRODUCT_BACKLOG.md`.
 
-- preserve modular architecture
-- write production-quality code
-- avoid duplicated logic
-- prefer reusable components
-- keep calculation logic pure
-- never hardcode business rules
-- keep vendor neutrality
+For every feature: implementation plan → wait for approval → implement → `npm run build`
+clean → update documentation. Whenever architecture changes, update
+`docs/PROJECT_STATE.md`, `docs/ARCHITECTURE.md`, and README.md; whenever calculations
+change, update docs and examples. Never skip documentation updates — `PROJECT_STATE.md`
+gets a session note and a "Last updated" bump at the end of each working session.
 
----
-
-# Development Workflow
-
-Before writing code
-
-1. Read docs/PROJECT_STATE.md
-2. Read README.md
-3. Understand current sprint
-
-For every feature
-
-1. Create implementation plan
-2. Wait for approval
-3. Implement
-4. Build project
-5. Fix errors
-6. Update documentation
-7. Update docs/PROJECT_STATE.md
-
-Never skip documentation updates.
-
-When a feature is finished, follow the Git Workflow section below — it governs from
-build/test through commit and push.
-
----
-
-# Coding Standards
-
-- Small reusable functions
-- No magic numbers
-- Meaningful names
-- Comments only when necessary
-- Keep UI separate from calculations
-
----
-
-# Testing
-
-Every feature must
-
-- build successfully
-- preserve existing functionality
-- avoid regressions
-
----
-
-# Recently Completed
-
-- "Your Configuration" live BOM column (PRODUCT_BACKLOG.md #2 / DECISIONS.md D10) —
-  shipped 2026-07-06
-- Colocation TCO formula fix — missing `annualSupport` cost (PRODUCT_BACKLOG.md #3) —
-  shipped 2026-07-06
-
-Do not re-flag these as open. See `docs/PROJECT_STATE.md` and `docs/CHANGELOG.md` for
-detail, including residuals noted as separate open items (e.g. `COLO_PER_KW_MONTH`
-recalibration).
-
----
-
-# Current Priorities
-
-Priority 1
-
-- Scenario Save & Compare
-
-Priority 2
-
-- Sensitivity Analysis
-
-Priority 3
-
-- Digital Twin
-
-Priority 4
-
-- Architecture Recommendation Engine
-
----
-
-# Files that require synchronization
-
-Whenever architecture changes
-
-Update
-
-- docs/PROJECT_STATE.md
-- README.md
-
-Whenever calculations change
-
-Update
-
-- Documentation
-- Examples
-
----
-
-# Git Workflow
+## Git workflow
 
 When a feature is finished, in order:
 
-1. Run `npm run build`
-2. Fix any build errors
-3. Run the full test suite
-4. Show `git diff` (or a summary of it if large)
-5. Generate a professional commit message
-6. Commit the changes — committing locally does not require a separate approval step; the
-   feature was already approved before implementation started (see Development Workflow)
-7. Ask for approval
-8. Push to GitHub only after that approval
+1. `npm run build` — fix any errors
+2. `npm test` — full suite
+3. Show `git diff` (or a summary if large)
+4. Generate a professional commit message
+5. Commit — no separate approval needed (the feature was approved before implementation)
+6. **Ask for approval, then push.** Push always needs a fresh explicit yes, even though
+   committing doesn't. Never skip steps 1–3 before committing.
 
-Never push without explicit approval — push is the step that always needs a fresh yes, even
-if committing locally didn't. Never skip steps 1-4 (build/fix/test/diff) before committing,
-even if step 6 itself doesn't need a separate approval gate.
+All git steps run in `~/workspace/nydux` (see Repo locations above).
 
-Note (2026-07-06): this repo's git history lives in `~/workspace/nydux` (a native Linux
-mirror), not the Windows-mounted project path — see `docs/DECISIONS.md` D9 for why. Steps
-1-6 run there; step 4's diff and step 6's commit both happen against that location.
+## Current status
 
----
-
-# Communication Style
-
-Explain
-
-- why
-- risks
-- alternatives
-
-before major changes.
+v2.0 shipped: 4 tabs (Token Estimation, Training Sizing, Inference Sizing, BOM & TCO),
+live "Your Configuration" BOM column, colocation-TCO `annualSupport` fix — do not re-flag
+those as open. Open residuals and next priorities (scenario save/compare is Priority 1)
+live in `docs/PROJECT_STATE.md` §8 and `docs/PRODUCT_BACKLOG.md`.
